@@ -243,6 +243,12 @@
   #fc-reselect-row .btn{padding:13px 40px; border-radius:999px; font-size:15.5px; font-weight:700; letter-spacing:.06em; box-shadow:0 3px 12px rgba(0,0,0,.22);}
   body.light #fc-reselect-row .btn, body.teal-light #fc-reselect-row .btn{box-shadow:0 3px 10px rgba(30,50,70,.14);}
   #fc-reselect-row .btn:active:not(:disabled){transform:scale(.92); filter:brightness(1.08);}
+  /* 卡片滑动切换动画 */
+  @keyframes fcInR{from{transform:translateX(28px);opacity:.35}to{transform:none;opacity:1}}
+  @keyframes fcInL{from{transform:translateX(-28px);opacity:.35}to{transform:none;opacity:1}}
+  #fc-card.fc-in-r{animation:fcInR .18s ease-out;}
+  #fc-card.fc-in-l{animation:fcInL .18s ease-out;}
+  #fc-card{touch-action:pan-y; user-select:none; -webkit-user-select:none;}
   .seg button:active{transform:scale(.93);}
   .pick-field:active{transform:scale(.95); border-color:var(--accent); background:rgba(91,140,255,.09);}
   .pick-item:active:not(:disabled){transform:scale(.95); background:rgba(91,140,255,.18); border-color:var(--accent);}
@@ -536,7 +542,7 @@
           <use href="#fc-snow-arm" transform="rotate(300 50 50)"/>
           <circle cx="50" cy="50" r="3.5"/>
         </svg>
-        <div class="row" style="justify-content:space-between;margin:0 0 14px"><button class="exit-btn" id="btn-exit-fc" aria-label="返回上一级" title="返回上一级"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg></button><button class="btn ghost" id="fc-back" style="display:none;padding:7px 16px;font-size:13px">上一张</button></div>
+        <div class="row" style="justify-content:flex-start;margin:0 0 14px"><button class="exit-btn" id="btn-exit-fc" aria-label="返回上一级" title="返回上一级"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg></button></div>
         <div id="fc-head"></div>
         <div id="fc-card" style="cursor:pointer;min-height:230px;max-height:56vh;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:12px;background:var(--bg2);padding:24px;margin-top:10px"></div>
         <p class="muted" id="fc-hint" style="margin-top:10px;text-align:center">先回忆词义，再点击卡片核对</p>
@@ -3190,7 +3196,7 @@ const LS_KEY = "wordTrainer.v1";
    原理：APK 只是壳，页面本体可热替换。服务器上放 version.json：
    {"version":"1.1.1","html":"<新版 index.html 的下载地址>","note":"更新说明"}
    应用启动时静默检查；发现新版本则弹窗，确认后下载并写入应用私有目录，重启即新版。 */
-const APP_VERSION = "1.1.4";
+const APP_VERSION = "1.1.5";
 /* 更新地址：raw 为主（版本信息最新），jsdelivr CDN 为备用（国内更稳但有缓存延迟） */
 const UPDATE_MANIFESTS = [
   "https://raw.githubusercontent.com/Huixd-ai/my-word/main/version.json",
@@ -4104,8 +4110,8 @@ $("btn-today").onclick = ()=>{
   const fp = (state.fcProg && state.fcProg.date===t) ? state.fcProg : null;
   const tp = (state.todayPlan && state.todayPlan.date===t) ? state.todayPlan : null;
   if(fp){
-    if(fp.i >= fp.queue.length){ // 今日已完成 → 再次学习（去重后打乱重开一轮）
-      fc = newFcSession(fp.queue.filter((w,i,a)=>a.indexOf(w)===i));
+    if(fp.i >= fp.queue.length){ // 今日已完成 → 再次学习（去重后打乱重开一轮，每词只出现一次）
+      fc = newFcSession(fp.queue.filter((w,i,a)=>a.indexOf(w)===i), true);
       saveFcProg();
       pushHist();
       backToStart(); $("quiz-start").style.display="none";
@@ -4113,7 +4119,7 @@ $("btn-today").onclick = ()=>{
       renderFc();
       return;
     }
-    fc = {queue:fp.queue.slice(), i:fp.i, stats:Object.assign({}, fp.stats), ratings:fp.ratings||{}, undoStack:[], pendingUndo:null};
+    fc = {queue:fp.queue.slice(), i:fp.i, viewI:fp.i, stats:Object.assign({}, fp.stats), ratings:fp.ratings||{}, undoStack:[], once:!!fp.once};
     pushHist(); // 进入子流程：压一条历史供返回键拦截
     backToStart(); $("quiz-start").style.display="none";
     $("fc-run").style.display="block";
@@ -4236,40 +4242,44 @@ $("btn-plan-back").onclick = ()=>{
 /* 重新生成：清空今日计划并按当前选词方式重新抽取 */
 $("btn-plan-regen").onclick = ()=>{ state.todayPlan = null; save(); startToday(); };
 function renderFc(){
-  const w = fc.queue[fc.i];
+  const browsing = fc.viewI < fc.i; // 回看中：查看已评价的卡片
+  const w = fc.queue[fc.viewI];
   const c = getCard(w);
   const isNew = !srsOf(w);
   $("fc-head").innerHTML =
-    `<span class="badge b2">${fc.i+1} / ${fc.queue.length}</span>` +
-    (isNew ? `<span class="badge">新词</span>` : `<span class="badge warn">复习</span>`) +
+    `<span class="badge b2">${fc.viewI+1} / ${fc.queue.length}</span>` +
+    (browsing ? `<span class="badge">回看</span>` : isNew ? `<span class="badge">新词</span>` : `<span class="badge warn">复习</span>`) +
     `<button class="snd-btn" style="margin-left:8px" id="fc-snd">${SND}<span>${esc(w)}</span></button>`;
   $("fc-snd").onclick = ()=>speak(w);
   autoScroll(document.querySelector("#fc-snd span"));
-  if(state.settings && state.settings.autoSpeak) speak(w); // 自动播放语音（可在学习设置中关闭）
+  if(!browsing && state.settings && state.settings.autoSpeak) speak(w); // 自动播放语音（可在学习设置中关闭）
   const box = $("fc-card");
-  box.style.justifyContent = "center"; box.scrollTop = 0; // 新词重置：正面居中、滚动归零
+  box.style.justifyContent = "center"; box.scrollTop = 0; // 重置：正面居中、滚动归零
   const ipa = wordIPA(w);
   const pos = wordPOS(w, c);
   box.innerHTML = `<div style="font-size:34px;font-weight:700">${esc(w)}</div>` +
     (ipa ? `<div class="muted" style="margin-top:8px;font-size:16px">${esc(ipa)}</div>` : "") +
     (pos ? `<div class="fc-pos" style="margin-top:6px;font-size:15px">${esc(pos)}</div>` : "") +
     `<div class="muted" style="margin-top:10px">点击卡片显示释义、例句</div>`;
-  box.onclick = ()=>flipFcCard(box, w, c, ipa, pos);
-  if(fc.pendingUndo){
-    // 回退模式：直接展示上一张的背面，三个选项替换为「重新选择」
-    flipFcCard(box, w, c, ipa, pos);
+  box.onclick = ()=>flipFcCard(box, w, c, ipa, pos, false);
+  if(browsing){
+    // 回看模式：直接展示背面；仅最近一张可「重新选择」，更早的只能浏览；左滑回到下一张
+    flipFcCard(box, w, c, ipa, pos, true);
     $("fc-rate").style.display = "none";
-    $("fc-reselect-row").style.display = "flex";
-    $("fc-hint").textContent = "已回退到上一张卡片，点击「重新选择」可重新评价";
+    const canReselect = fc.viewI === fc.i - 1;
+    $("fc-reselect-row").style.display = canReselect ? "flex" : "none";
+    const u = fc.undoStack[fc.viewI];
+    const label = u ? ({5:"认识",3:"模糊",1:"不认识"})[u.q] : "";
+    $("fc-hint").textContent = (label ? `回看 · 本张已评价：${label}　` : "回看　") +
+      (canReselect ? "可重新选择，或左滑返回" : "左滑返回下一张");
   }else{
     $("fc-rate").style.display = "none";
     $("fc-reselect-row").style.display = "none";
-    $("fc-hint").textContent = "先回忆词义，再点击卡片核对";
+    $("fc-hint").textContent = fc.i > 0 ? "先回忆词义，再点击卡片核对 · 右滑回看上一张" : "先回忆词义，再点击卡片核对";
   }
-  updateFcBack();
 }
 /* 翻面：普通学习卡片不显示语义核（深训专属），改为 译注 + 常用搭配 + 词根词缀；没有的字段就不显示 */
-function flipFcCard(box, w, c, ipa, pos){
+function flipFcCard(box, w, c, ipa, pos, browsing){
   const cols = (c && c.collocations) || [];
   const back = (c && (c.gloss || cols.length || c.root))
     ? `<div style="font-size:22px;font-weight:700">${esc(w)}${pos?` <span class="fc-pos" style="font-size:14px">${esc(pos)}</span>`:""}</div>` +
@@ -4285,10 +4295,11 @@ function flipFcCard(box, w, c, ipa, pos){
   box.style.justifyContent = "flex-start"; // 背面整体（译注+搭配+例句）在卡片内一起滚动，卡片高度封顶
   loadExample(w);
   box.onclick = null;
-  if(!fc.pendingUndo){
+  if(!browsing){
     $("fc-rate").style.display = "flex";
     const rc = fc.ratings[w] || {k:0};
-    $("fc-hint").textContent = rc.done ? "本词已完成，诚实评价即可" : `对照释义诚实评价（本词已认识 ${rc.k} / 2 次）`;
+    $("fc-hint").textContent = fc.once ? "对照释义诚实评价（本轮每词只出现一次）"
+      : rc.done ? "本词已完成，诚实评价即可" : `对照释义诚实评价（本词已认识 ${rc.k} / 2 次）`;
   }
 }
 /* ===== 熟悉度画像：记录每次学习中的认识/模糊/不认识，驱动间隔重现、复习选题与计划调整 ===== */
@@ -4305,13 +4316,14 @@ function famScore(w){ // 0..1 越熟越高；无记录 → null
   const n = f ? (f.k + f.v + f.f) : 0;
   return n ? (f.k + 0.5*f.v)/n : null;
 }
-/* 新一轮学习会话：词序打乱；每词需两次「认识」才完成，未完成的按间隔规律重现 */
-function newFcSession(words){
-  return {queue: shuffle(words.slice()), i:0, stats:{know:0, vague:0, forgot:0}, ratings:{}, undoStack:[], pendingUndo:null};
+/* 新一轮学习会话：词序打乱；首轮每词需两次「认识」才完成，未完成的按间隔规律重现；
+   once=true 为当日重复学习：每词只出现一次，单次评价直接记入记忆曲线与画像 */
+function newFcSession(words, once){
+  return {queue: shuffle(words.slice()), i:0, viewI:0, stats:{know:0, vague:0, forgot:0}, ratings:{}, undoStack:[], once:!!once};
 }
 function saveFcProg(){
   if(!fc) return;
-  state.fcProg = {date:todayStr(), queue:fc.queue.slice(), i:fc.i, stats:Object.assign({}, fc.stats), ratings:fc.ratings};
+  state.fcProg = {date:todayStr(), queue:fc.queue.slice(), i:fc.i, stats:Object.assign({}, fc.stats), ratings:fc.ratings, once:!!fc.once};
   save();
 }
 /* 间隔重现规律（扩展提取练习）：回忆越困难重现越快——不认识≈隔 3 张，模糊≈隔 5 张，首次认识≈隔 7 张；
@@ -4334,7 +4346,17 @@ function rateFc(q){ // 认识=5 模糊=3 不认识=1
   };
   if(q===5){ rec.k++; fc.stats.know++; } else if(q===3){ rec.v++; fc.stats.vague++; } else { rec.f++; fc.stats.forgot++; }
   famRecord(w, q);
-  if(rec.k >= 2 && !rec.done){
+  if(fc.once){
+    // 当日重复学习：每词只评一次，单次评价直接记入记忆曲线（认识→5 / 模糊→3 / 不认识→1），并整合进当日画像
+    u.srsApplied = true;
+    u.hadSrs = !!(state.srs && state.srs[w]);
+    u.srsBefore = u.hadSrs ? JSON.parse(JSON.stringify(state.srs[w])) : null;
+    u.curveHistBefore = JSON.parse(JSON.stringify(state.curveHist || {}));
+    u.todayWordAdded = !(((state.todayWords||{})[t])||[]).includes(w);
+    rec.done = true;
+    addTodayWord(w);
+    srsRecord(w, q);
+  }else if(rec.k >= 2 && !rec.done){
     // 完成：按本次会话综合表现记一次记忆曲线评分（有不认识→3，有模糊→4，全认识→5）
     u.srsApplied = true;
     u.hadSrs = !!(state.srs && state.srs[w]);
@@ -4351,34 +4373,72 @@ function rateFc(q){ // 认识=5 模糊=3 不认识=1
     fc.queue.splice(u.splicePos, 0, w);
   }
   fc.undoStack.push(u);
-  fc.pendingUndo = null;
   fc.i++;
+  fc.viewI = fc.i; // 评价后前进到下一张
   saveFcProg();
   if(fc.i >= fc.queue.length) finishFc(); else renderFc();
 }
-/* 回退：回到上一张卡片（仅展示，不撤销），点「重新选择」才真正撤销并重新评价 */
-function updateFcBack(){
-  const b = $("fc-back"); if(!b) return;
-  b.style.display = (fc && !fc.pendingUndo && fc.undoStack && fc.undoStack.length && fc.i > 0) ? "" : "none";
+/* 滑动切换：右滑回看上一张（仅浏览，不撤销），左滑前进；点「重新选择」才撤销并重新评价 */
+function fcNav(dir){ // dir=1 回看上一张；dir=-1 前进一张
+  if(!fc) return;
+  const box = $("fc-card");
+  if(dir > 0 && fc.viewI > 0){
+    fc.viewI--; renderFc();
+    box.classList.remove("fc-in-l","fc-in-r"); void box.offsetWidth; box.classList.add("fc-in-r");
+  }else if(dir < 0 && fc.viewI < fc.i){
+    fc.viewI++; renderFc();
+    box.classList.remove("fc-in-l","fc-in-r"); void box.offsetWidth; box.classList.add("fc-in-l");
+  }
 }
-$("fc-back").onclick = ()=>{
-  if(!fc || !fc.undoStack.length || fc.i <= 0 || fc.pendingUndo) return;
-  fc.pendingUndo = fc.undoStack[fc.undoStack.length-1];
-  fc.i--;
-  renderFc();
-};
 $("fc-reselect").onclick = ()=>{
-  if(!fc || !fc.pendingUndo) return;
+  if(!fc || fc.viewI !== fc.i - 1 || !fc.undoStack.length) return;
   const u = fc.undoStack.pop();
   applyFcUndo(u);
-  fc.pendingUndo = null;
+  fc.i = fc.viewI; // 回退到该位置，重新评价后自然前进
   // 停留在该词背面，直接重新三选
   $("fc-reselect-row").style.display = "none";
   $("fc-rate").style.display = "flex";
   const rc = fc.ratings[u.word] || {k:0};
-  $("fc-hint").textContent = rc.done ? "本词已完成，诚实评价即可" : `重新评价（本词已认识 ${rc.k} / 2 次）`;
-  updateFcBack();
+  $("fc-hint").textContent = fc.once ? "重新评价（本轮每词只出现一次）"
+    : rc.done ? "本词已完成，诚实评价即可" : `重新评价（本词已认识 ${rc.k} / 2 次）`;
 };
+/* 卡片滑动手势：横向滑动与纵向滚动区分（横向位移明显大于纵向才触发），滑动后的误触点击会被吞掉 */
+(function(){
+  const box = $("fc-card");
+  let sx=0, sy=0, hIntent=false, suppress=false;
+  box.addEventListener("touchstart", e=>{
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY; hIntent = false;
+  }, {passive:true});
+  box.addEventListener("touchmove", e=>{
+    const t = e.touches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if(!hIntent && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.3) hIntent = true;
+    if(hIntent && e.cancelable) e.preventDefault(); // 判定为横向滑动后阻止纵向滚动
+  }, {passive:false});
+  box.addEventListener("touchend", e=>{
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if(hIntent && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)){
+      suppress = true; setTimeout(()=>{ suppress = false; }, 350);
+      fcNav(dx > 0 ? 1 : -1);
+    }
+    hIntent = false;
+  });
+  /* 桌面鼠标拖拽（浏览器预览同样可用） */
+  let md = false;
+  box.addEventListener("mousedown", e=>{ md = true; sx = e.clientX; sy = e.clientY; });
+  window.addEventListener("mouseup", e=>{
+    if(!md) return; md = false;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if(Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5){
+      suppress = true; setTimeout(()=>{ suppress = false; }, 350);
+      fcNav(dx > 0 ? 1 : -1);
+    }
+  });
+  box.addEventListener("click", e=>{
+    if(suppress){ e.preventDefault(); e.stopImmediatePropagation(); suppress = false; }
+  }, true);
+})();
 function applyFcUndo(u){
   const t = todayStr();
   const rec = fc.ratings[u.word];
@@ -4413,17 +4473,20 @@ function finishFc(){
   $("fc-run").style.display="none";
   $("quiz-end").style.display="block";
   const words = Object.keys(fc.ratings).length;
-  $("quiz-summary").innerHTML =
-    `<p style="font-size:20px;margin-bottom:10px">今日学习完成：${words} 词全部达到「两次认识」</p>` +
-    `<p>认识 <b style="color:var(--ok)">${fc.stats.know}</b> · 模糊 <b style="color:var(--warn)">${fc.stats.vague}</b> · 不认识 <b style="color:var(--bad)">${fc.stats.forgot}</b></p>` +
-    `<p class="muted">已按记忆曲线排定下次复习日期——每次选择都已记入熟悉度画像，影响后续复习与计划。</p>`;
+  $("quiz-summary").innerHTML = fc.once
+    ? `<p style="font-size:20px;margin-bottom:10px">本轮巩固完成：${words} 词已复习一遍</p>` +
+      `<p>认识 <b style="color:var(--ok)">${fc.stats.know}</b> · 模糊 <b style="color:var(--warn)">${fc.stats.vague}</b> · 不认识 <b style="color:var(--bad)">${fc.stats.forgot}</b></p>` +
+      `<p class="muted">本轮每次评价都已记入熟悉度画像与记忆曲线，整合进今日分析。</p>`
+    : `<p style="font-size:20px;margin-bottom:10px">今日学习完成：${words} 词全部达到「两次认识」</p>` +
+      `<p>认识 <b style="color:var(--ok)">${fc.stats.know}</b> · 模糊 <b style="color:var(--warn)">${fc.stats.vague}</b> · 不认识 <b style="color:var(--bad)">${fc.stats.forgot}</b></p>` +
+      `<p class="muted">已按记忆曲线排定下次复习日期——每次选择都已记入熟悉度画像，影响后续复习与计划。</p>`;
   const again = $("btn-again");
   again.textContent = "再次学习";
   again.onclick = startFcAgain;
 }
-/* 再次学习：今日词去重后重新打乱，仍按「两次认识 + 间隔重现」规则进行 */
+/* 再次学习（当日重复）：今日词去重后重新打乱，每词只出现一次，评价仍记入画像与当日分析 */
 function startFcAgain(){
-  fc = newFcSession(fc.queue.filter((w,i,a)=>a.indexOf(w)===i));
+  fc = newFcSession(fc.queue.filter((w,i,a)=>a.indexOf(w)===i), true);
   saveFcProg();
   $("quiz-end").style.display="none";
   $("fc-run").style.display="block";

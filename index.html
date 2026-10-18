@@ -240,6 +240,9 @@
   #fc-rate .btn{flex:1; max-width:140px; padding:13px 0; border-radius:999px; font-size:15.5px; font-weight:700; letter-spacing:.06em; box-shadow:0 3px 12px rgba(0,0,0,.22);}
   body.light #fc-rate .btn, body.teal-light #fc-rate .btn{box-shadow:0 3px 10px rgba(30,50,70,.14);}
   #fc-rate .btn:active:not(:disabled){transform:scale(.92); filter:brightness(1.08);}
+  #fc-reselect-row .btn{padding:13px 40px; border-radius:999px; font-size:15.5px; font-weight:700; letter-spacing:.06em; box-shadow:0 3px 12px rgba(0,0,0,.22);}
+  body.light #fc-reselect-row .btn, body.teal-light #fc-reselect-row .btn{box-shadow:0 3px 10px rgba(30,50,70,.14);}
+  #fc-reselect-row .btn:active:not(:disabled){transform:scale(.92); filter:brightness(1.08);}
   .seg button:active{transform:scale(.93);}
   .pick-field:active{transform:scale(.95); border-color:var(--accent); background:rgba(91,140,255,.09);}
   .pick-item:active:not(:disabled){transform:scale(.95); background:rgba(91,140,255,.18); border-color:var(--accent);}
@@ -533,14 +536,17 @@
           <use href="#fc-snow-arm" transform="rotate(300 50 50)"/>
           <circle cx="50" cy="50" r="3.5"/>
         </svg>
-        <div class="row" style="justify-content:flex-start;margin:0 0 14px"><button class="exit-btn" id="btn-exit-fc" aria-label="返回上一级" title="返回上一级"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg></button></div>
+        <div class="row" style="justify-content:space-between;margin:0 0 14px"><button class="exit-btn" id="btn-exit-fc" aria-label="返回上一级" title="返回上一级"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg></button><button class="btn ghost" id="fc-back" style="display:none;padding:7px 16px;font-size:13px">上一张</button></div>
         <div id="fc-head"></div>
         <div id="fc-card" style="cursor:pointer;min-height:230px;max-height:56vh;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:12px;background:var(--bg2);padding:24px;margin-top:10px"></div>
         <p class="muted" id="fc-hint" style="margin-top:10px;text-align:center">先回忆词义，再点击卡片核对</p>
         <div class="row" id="fc-rate" style="justify-content:center;display:none;margin-top:16px">
           <button class="btn" id="fc-forgot" style="background:var(--bad)">不认识</button>
-          <button class="btn" id="fc-vague" style="background:var(--warn);color:#1a1d26">模糊</button>
+          <button class="btn" id="fc-vague" style="background:#f8ecc2;color:#6d5a13">模糊</button>
           <button class="btn" id="fc-know" style="background:var(--ok)">认识</button>
+        </div>
+        <div class="row" id="fc-reselect-row" style="justify-content:center;display:none;margin-top:16px">
+          <button class="btn" id="fc-reselect" style="min-width:180px">重新选择</button>
         </div>
       </div>
     </div>
@@ -3184,7 +3190,7 @@ const LS_KEY = "wordTrainer.v1";
    原理：APK 只是壳，页面本体可热替换。服务器上放 version.json：
    {"version":"1.1.1","html":"<新版 index.html 的下载地址>","note":"更新说明"}
    应用启动时静默检查；发现新版本则弹窗，确认后下载并写入应用私有目录，重启即新版。 */
-const APP_VERSION = "1.1.3";
+const APP_VERSION = "1.1.4";
 /* 更新地址：raw 为主（版本信息最新），jsdelivr CDN 为备用（国内更稳但有缓存延迟） */
 const UPDATE_MANIFESTS = [
   "https://raw.githubusercontent.com/Huixd-ai/my-word/main/version.json",
@@ -4107,7 +4113,7 @@ $("btn-today").onclick = ()=>{
       renderFc();
       return;
     }
-    fc = {queue:fp.queue.slice(), i:fp.i, stats:Object.assign({}, fp.stats), ratings:fp.ratings||{}};
+    fc = {queue:fp.queue.slice(), i:fp.i, stats:Object.assign({}, fp.stats), ratings:fp.ratings||{}, undoStack:[], pendingUndo:null};
     pushHist(); // 进入子流程：压一条历史供返回键拦截
     backToStart(); $("quiz-start").style.display="none";
     $("fc-run").style.display="block";
@@ -4248,29 +4254,42 @@ function renderFc(){
     (ipa ? `<div class="muted" style="margin-top:8px;font-size:16px">${esc(ipa)}</div>` : "") +
     (pos ? `<div class="fc-pos" style="margin-top:6px;font-size:15px">${esc(pos)}</div>` : "") +
     `<div class="muted" style="margin-top:10px">点击卡片显示释义、例句</div>`;
-  box.onclick = ()=>{
-    // 普通学习卡片：不显示语义核（深训专属），改为 译注 + 常用搭配 + 词根词缀；没有的字段就不显示
-    const cols = (c && c.collocations) || [];
-    const back = (c && (c.gloss || cols.length || c.root))
-      ? `<div style="font-size:22px;font-weight:700">${esc(w)}${pos?` <span class="fc-pos" style="font-size:14px">${esc(pos)}</span>`:""}</div>` +
-        (ipa ? `<div class="muted" style="margin-top:4px;font-size:15px">${esc(ipa)}</div>` : "") +
-        (c.gloss ? `<p style="font-size:17px;margin-top:10px;max-width:560px;line-height:1.7">${esc(c.gloss)}</p>` : "") +
-        (c.root ? `<p class="muted" style="margin-top:12px;font-size:14px">词根词缀：${esc(c.root)}</p>` : "") +
-        (cols.length ? `<div style="margin-top:12px;font-size:14px;line-height:1.9;max-width:560px;text-align:left"><b>常用搭配</b><br>` +
-          cols.map(x=>`${esc(x.phrase)} — ${esc(x.gloss)}`).join("<br>") + `</div>` : "")
-      : `<div style="font-size:22px;font-weight:700">${esc(w)}${pos?` <span class="fc-pos" style="font-size:14px">${esc(pos)}</span>`:""}</div>` +
-        (ipa ? `<div class="muted" style="margin-top:4px;font-size:15px">${esc(ipa)}</div>` : "") +
-        `<p style="font-size:18px;margin-top:12px;max-width:560px">（暂无译注，可在词库页导出后发给 Kimi 补全）</p>`;
-    box.innerHTML = back + `<div id="fc-ex" style="width:100%;text-align:center"></div>`;
-    box.style.justifyContent = "flex-start"; // 背面整体（译注+搭配+例句）在卡片内一起滚动，卡片高度封顶
-    loadExample(w);
-    box.onclick = null;
+  box.onclick = ()=>flipFcCard(box, w, c, ipa, pos);
+  if(fc.pendingUndo){
+    // 回退模式：直接展示上一张的背面，三个选项替换为「重新选择」
+    flipFcCard(box, w, c, ipa, pos);
+    $("fc-rate").style.display = "none";
+    $("fc-reselect-row").style.display = "flex";
+    $("fc-hint").textContent = "已回退到上一张卡片，点击「重新选择」可重新评价";
+  }else{
+    $("fc-rate").style.display = "none";
+    $("fc-reselect-row").style.display = "none";
+    $("fc-hint").textContent = "先回忆词义，再点击卡片核对";
+  }
+  updateFcBack();
+}
+/* 翻面：普通学习卡片不显示语义核（深训专属），改为 译注 + 常用搭配 + 词根词缀；没有的字段就不显示 */
+function flipFcCard(box, w, c, ipa, pos){
+  const cols = (c && c.collocations) || [];
+  const back = (c && (c.gloss || cols.length || c.root))
+    ? `<div style="font-size:22px;font-weight:700">${esc(w)}${pos?` <span class="fc-pos" style="font-size:14px">${esc(pos)}</span>`:""}</div>` +
+      (ipa ? `<div class="muted" style="margin-top:4px;font-size:15px">${esc(ipa)}</div>` : "") +
+      (c.gloss ? `<p style="font-size:17px;margin-top:10px;max-width:560px;line-height:1.7">${esc(c.gloss)}</p>` : "") +
+      (c.root ? `<p class="muted" style="margin-top:12px;font-size:14px">词根词缀：${esc(c.root)}</p>` : "") +
+      (cols.length ? `<div style="margin-top:12px;font-size:14px;line-height:1.9;max-width:560px;text-align:left"><b>常用搭配</b><br>` +
+        cols.map(x=>`${esc(x.phrase)} — ${esc(x.gloss)}`).join("<br>") + `</div>` : "")
+    : `<div style="font-size:22px;font-weight:700">${esc(w)}${pos?` <span class="fc-pos" style="font-size:14px">${esc(pos)}</span>`:""}</div>` +
+      (ipa ? `<div class="muted" style="margin-top:4px;font-size:15px">${esc(ipa)}</div>` : "") +
+      `<p style="font-size:18px;margin-top:12px;max-width:560px">（暂无译注，可在词库页导出后发给 Kimi 补全）</p>`;
+  box.innerHTML = back + `<div id="fc-ex" style="width:100%;text-align:center"></div>`;
+  box.style.justifyContent = "flex-start"; // 背面整体（译注+搭配+例句）在卡片内一起滚动，卡片高度封顶
+  loadExample(w);
+  box.onclick = null;
+  if(!fc.pendingUndo){
     $("fc-rate").style.display = "flex";
     const rc = fc.ratings[w] || {k:0};
     $("fc-hint").textContent = rc.done ? "本词已完成，诚实评价即可" : `对照释义诚实评价（本词已认识 ${rc.k} / 2 次）`;
-  };
-  $("fc-rate").style.display = "none";
-  $("fc-hint").textContent = "先回忆词义，再点击卡片核对";
+  }
 }
 /* ===== 熟悉度画像：记录每次学习中的认识/模糊/不认识，驱动间隔重现、复习选题与计划调整 ===== */
 function famRecord(w, q){
@@ -4288,7 +4307,7 @@ function famScore(w){ // 0..1 越熟越高；无记录 → null
 }
 /* 新一轮学习会话：词序打乱；每词需两次「认识」才完成，未完成的按间隔规律重现 */
 function newFcSession(words){
-  return {queue: shuffle(words.slice()), i:0, stats:{know:0, vague:0, forgot:0}, ratings:{}};
+  return {queue: shuffle(words.slice()), i:0, stats:{know:0, vague:0, forgot:0}, ratings:{}, undoStack:[], pendingUndo:null};
 }
 function saveFcProg(){
   if(!fc) return;
@@ -4301,21 +4320,90 @@ const FC_GAP = {1:3, 3:5, 5:7};
 function rateFc(q){ // 认识=5 模糊=3 不认识=1
   const w = fc.queue[fc.i];
   const rec = fc.ratings[w] || (fc.ratings[w] = {k:0, v:0, f:0, done:false});
+  const t = todayStr();
+  // —— 撤销快照：「上一张 → 重新选择」时完整还原本次评价造成的一切改动 ——
+  const fam0 = (state.fam && state.fam[w]) || null;
+  const day0 = fam0 && fam0.days && fam0.days[t] ? fam0.days[t] : null;
+  const u = {
+    word:w, q:q, splicePos:-1, srsApplied:false,
+    recBefore:{k:rec.k, v:rec.v, f:rec.f, done:rec.done},
+    statsBefore:{know:fc.stats.know, vague:fc.stats.vague, forgot:fc.stats.forgot},
+    hadFam: !!fam0,
+    famBefore: fam0 ? {k:fam0.k, v:fam0.v, f:fam0.f} : null,
+    famDayBefore: day0 ? {k:day0.k, v:day0.v, f:day0.f} : null
+  };
   if(q===5){ rec.k++; fc.stats.know++; } else if(q===3){ rec.v++; fc.stats.vague++; } else { rec.f++; fc.stats.forgot++; }
   famRecord(w, q);
   if(rec.k >= 2 && !rec.done){
     // 完成：按本次会话综合表现记一次记忆曲线评分（有不认识→3，有模糊→4，全认识→5）
+    u.srsApplied = true;
+    u.hadSrs = !!(state.srs && state.srs[w]);
+    u.srsBefore = u.hadSrs ? JSON.parse(JSON.stringify(state.srs[w])) : null;
+    u.curveHistBefore = JSON.parse(JSON.stringify(state.curveHist || {}));
+    u.todayWordAdded = !(((state.todayWords||{})[t])||[]).includes(w);
     rec.done = true;
     addTodayWord(w);
     srsRecord(w, rec.f>0 ? 3 : rec.v>0 ? 4 : 5);
     bumpStudyToday();
   }else if(!rec.done){
     const gap = Math.max(2, FC_GAP[q] + Math.floor(Math.random()*3) - 1);
-    fc.queue.splice(Math.min(fc.i + gap, fc.queue.length), 0, w);
+    u.splicePos = Math.min(fc.i + gap, fc.queue.length);
+    fc.queue.splice(u.splicePos, 0, w);
   }
+  fc.undoStack.push(u);
+  fc.pendingUndo = null;
   fc.i++;
   saveFcProg();
   if(fc.i >= fc.queue.length) finishFc(); else renderFc();
+}
+/* 回退：回到上一张卡片（仅展示，不撤销），点「重新选择」才真正撤销并重新评价 */
+function updateFcBack(){
+  const b = $("fc-back"); if(!b) return;
+  b.style.display = (fc && !fc.pendingUndo && fc.undoStack && fc.undoStack.length && fc.i > 0) ? "" : "none";
+}
+$("fc-back").onclick = ()=>{
+  if(!fc || !fc.undoStack.length || fc.i <= 0 || fc.pendingUndo) return;
+  fc.pendingUndo = fc.undoStack[fc.undoStack.length-1];
+  fc.i--;
+  renderFc();
+};
+$("fc-reselect").onclick = ()=>{
+  if(!fc || !fc.pendingUndo) return;
+  const u = fc.undoStack.pop();
+  applyFcUndo(u);
+  fc.pendingUndo = null;
+  // 停留在该词背面，直接重新三选
+  $("fc-reselect-row").style.display = "none";
+  $("fc-rate").style.display = "flex";
+  const rc = fc.ratings[u.word] || {k:0};
+  $("fc-hint").textContent = rc.done ? "本词已完成，诚实评价即可" : `重新评价（本词已认识 ${rc.k} / 2 次）`;
+  updateFcBack();
+};
+function applyFcUndo(u){
+  const t = todayStr();
+  const rec = fc.ratings[u.word];
+  if(rec){ rec.k=u.recBefore.k; rec.v=u.recBefore.v; rec.f=u.recBefore.f; rec.done=u.recBefore.done; }
+  fc.stats = {know:u.statsBefore.know, vague:u.statsBefore.vague, forgot:u.statsBefore.forgot};
+  if(state.fam){
+    if(!u.hadFam){ delete state.fam[u.word]; } // 本次评价才创建的记录：整体删除
+    else if(state.fam[u.word]){
+      const f = state.fam[u.word]; f.k=u.famBefore.k; f.v=u.famBefore.v; f.f=u.famBefore.f;
+      if(!u.famDayBefore){ if(f.days) delete f.days[t]; } // 当日条目也是本次创建的：删除
+      else { const d = f.days && f.days[t]; if(d){ d.k=u.famDayBefore.k; d.v=u.famDayBefore.v; d.f=u.famDayBefore.f; } }
+    }
+  }
+  if(u.splicePos >= 0 && fc.queue[u.splicePos]===u.word) fc.queue.splice(u.splicePos, 1); // 移除本次评价插入的重现副本
+  if(u.srsApplied){
+    if(u.hadSrs) state.srs[u.word] = JSON.parse(JSON.stringify(u.srsBefore));
+    else if(state.srs) delete state.srs[u.word];
+    state.curveHist = JSON.parse(JSON.stringify(u.curveHistBefore || {}));
+    if(u.todayWordAdded){
+      const arr = ((state.todayWords||{})[t])||[];
+      const ix = arr.lastIndexOf(u.word); if(ix>-1) arr.splice(ix, 1);
+    }
+    if(state.studyToday) state.studyToday[t] = Math.max(0, (state.studyToday[t]||0)-1);
+  }
+  save(); saveFcProg();
 }
 $("fc-know").onclick = ()=>rateFc(5);
 $("fc-vague").onclick = ()=>rateFc(3);

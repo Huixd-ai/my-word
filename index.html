@@ -516,6 +516,7 @@
         <div id="plan-body"></div>
         <div class="row">
           <button class="btn" id="btn-plan-ok">确认开始</button>
+          <button class="btn ghost" id="btn-plan-regen">重新生成</button>
           <button class="btn ghost" id="btn-plan-back">返回修改</button>
         </div>
       </div>
@@ -594,6 +595,11 @@
           <span class="mr-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
           <span class="mr-name">每日词汇学习量<span class="mr-sub">新词与复习词的总量</span></span>
           <button class="pick-field mr-pick" id="q-daily-pick"><span class="pv">10 词</span> <span class="chev">›</span></button>
+        </div>
+        <div class="menu-row" style="cursor:default">
+          <span class="mr-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/></svg></span>
+          <span class="mr-name">选词方式<span class="mr-sub">每日学习计划中新词的抽取规则</span></span>
+          <button class="pick-field mr-pick" id="q-pickmode-pick"><span class="pv">随机抽取</span> <span class="chev">›</span></button>
         </div>
         <div class="menu-row" style="cursor:default">
           <span class="mr-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg></span>
@@ -3178,7 +3184,7 @@ const LS_KEY = "wordTrainer.v1";
    原理：APK 只是壳，页面本体可热替换。服务器上放 version.json：
    {"version":"1.1.1","html":"<新版 index.html 的下载地址>","note":"更新说明"}
    应用启动时静默检查；发现新版本则弹窗，确认后下载并写入应用私有目录，重启即新版。 */
-const APP_VERSION = "1.1.2";
+const APP_VERSION = "1.1.3";
 /* 更新地址：raw 为主（版本信息最新），jsdelivr CDN 为备用（国内更稳但有缓存延迟） */
 const UPDATE_MANIFESTS = [
   "https://raw.githubusercontent.com/Huixd-ai/my-word/main/version.json",
@@ -3301,6 +3307,8 @@ function load(){
       s.todayWords = s.todayWords || {};
       s.todayPlan = s.todayPlan || null;
       s.fcProg = s.fcProg || null;
+      s.deepProg = s.deepProg || null;   // 深度训练未完成的进度
+      s.fam = s.fam || {};               // 单词熟悉度画像：{k,v,f,days:{date:{k,v,f}}}
       s.settings = s.settings || {};
       if(typeof s.settings.dailyTotal !== "number") s.settings.dailyTotal = s.settings.dailyNew || 10;
       delete s.settings.dailyNew;
@@ -3308,10 +3316,11 @@ function load(){
       if(typeof s.settings.remindOn !== "boolean") s.settings.remindOn = false;
       if(typeof s.settings.remindTime !== "string" || !s.settings.remindTime) s.settings.remindTime = "21:00";
       if(typeof s.settings.autoSpeak !== "boolean") s.settings.autoSpeak = true;
+      if(["random","alpha","freq"].indexOf(s.settings.pickMode) < 0) s.settings.pickMode = "random";
       return s;
     }
   }catch(e){}
-  return {extra:{}, deleted:[], dims:{}, log:[], seen:{}, srs:{}, introduced:{}, curveHist:{}, book:"cet4h", checkins:{}, leaves:{}, studyToday:{}, exCache:{}, remindFired:"", todayWords:{}, todayPlan:null, fcProg:null, settings:{dailyTotal:10, dictSource:"auto", remindOn:false, remindTime:"21:00", theme:"system", autoSpeak:true}};
+  return {extra:{}, deleted:[], dims:{}, log:[], seen:{}, srs:{}, introduced:{}, curveHist:{}, book:"cet4h", checkins:{}, leaves:{}, studyToday:{}, exCache:{}, remindFired:"", todayWords:{}, todayPlan:null, fcProg:null, deepProg:null, fam:{}, settings:{dailyTotal:10, dictSource:"auto", remindOn:false, remindTime:"21:00", theme:"system", autoSpeak:true, pickMode:"random"}};
 }
 function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 const $ = id => document.getElementById(id); // 提前声明：其后所有模块的顶层绑定都依赖它
@@ -3615,7 +3624,7 @@ function makeQuestion(card, dim){
     const target = pick(card.cannot,1)[0];
     let dis = pick(card.collocations.map(c=>c.phrase),3);
     if(!target || dis.length<3) return null;
-    return {card, dim, prompt:`【${W} 的围墙】下面哪个不能和 ${W} 搭配？`,
+    return {card, dim, prompt:`下面哪个不能和 ${W} 搭配？`,
       options:shuffle([target].concat(dis)), answer:target,
       explain:`答案：${target} ✗（${W} 不是描述这一层的词）\n抽象词的难，难在它有一圈看不见的围墙。能搭配的：${dis.slice(0,3).join("、")}`};
   }
@@ -3648,7 +3657,10 @@ function makeQuestion(card, dim){
 function buildSession(n){
   const pool = [];
   for(const c of library()){
-    for(const d of availDims(c)) pool.push({card:c, dim:d, w:(1-dimsFor(c.word)[d])+0.05});
+    // 熟悉度画像：越不熟的词权重越高，优先进入快速复习
+    const fs = famScore(c.word);
+    const famW = fs === null ? 0.15 : (1 - fs) * 0.5;
+    for(const d of availDims(c)) pool.push({card:c, dim:d, w:(1-dimsFor(c.word)[d])+0.05+famW});
   }
   const qs = [];
   while(qs.length<n && pool.length){ // 出题失败不占用题数名额，继续抽取直到凑满 n 题
@@ -3722,7 +3734,7 @@ function setPickLabel(id, text){
       inner.append(a, g);
     }
     const half = inner.scrollWidth / 2;
-    pv.style.setProperty("--mq-dur", Math.max(3, half/45)+"s"); // 约 45px/s 匀速
+    pv.style.setProperty("--mq-dur", Math.max(4, half/26)+"s"); // 约 26px/s 匀速（放慢）
     pv.classList.add("marquee");
   }
 }
@@ -3747,7 +3759,7 @@ function autoScroll(el){
     const g2 = document.createElement("i"); g2.className = "mq-gap";
     inner.append(g1, b, g2);
     const half = inner.scrollWidth / 2;
-    el.style.setProperty("--mq-dur", Math.max(3, half/45)+"s");
+    el.style.setProperty("--mq-dur", Math.max(4, half/26)+"s");
     el.classList.add("marquee");
   }
 }
@@ -3757,6 +3769,24 @@ $("q-learn-pick").onclick = ()=>openPicker("深度训练每轮词数", [3,5,8].m
   learnN = parseInt(v,10); state.settings.learnN = learnN; save(); setPickLabel("q-learn-pick", learnN+" 词");
 });
 function startLearning(){
+  // 有未完成的深度训练进度 → 原样恢复（词、进度、各维度作答记录全部保留）
+  const dp = state.deepProg;
+  if(dp && dp.words && dp.words.length){
+    const queue = dp.words.map(w=>getCard(w)).filter(c=>c && cardComplete(c));
+    if(queue.length === dp.words.length && queue.length){
+      learn = {queue, wi:Math.min(dp.wi||0, queue.length-1),
+        dimIdx:(typeof dp.dimIdx==="number" ? dp.dimIdx : -1),
+        results:dp.results||[], done:dp.done||{}, resumeDim:dp.resumeDim||0, srsDone:dp.srsDone||{}};
+      pushHist();
+      document.getElementById("quiz-start").style.display="none";
+      document.getElementById("quiz-end").style.display="none";
+      document.getElementById("quiz-run").style.display="none";
+      document.getElementById("learn-run").style.display="block";
+      renderLearnStage();
+      return;
+    }
+    state.deepProg = null; save();
+  }
   const n = learnN;
   const full = library().filter(cardComplete);
   const unseen = full.filter(c=>!state.seen[c.word]);
@@ -3764,12 +3794,20 @@ function startLearning(){
   const queue = unseen.concat(seen).slice(0,n);
   if(queue.length===0){ showMsg("没有可学习的完整卡片，请先在「词库」中补全或导入卡片。"); return; }
   learn = {queue, wi:0, dimIdx:-1, results:[], done:{}, resumeDim:0, srsDone:{}};
+  saveDeep();
   pushHist(); // 进入子流程：压一条历史供返回键拦截
   document.getElementById("quiz-start").style.display="none";
   document.getElementById("quiz-end").style.display="none";
   document.getElementById("quiz-run").style.display="none";
   document.getElementById("learn-run").style.display="block";
   renderLearnStage();
+}
+/* 深度训练进度持久化：每一步都写入 state.deepProg，退出后再次进入原样续学 */
+function saveDeep(){
+  if(!learn) return;
+  state.deepProg = {date:todayStr(), words:learn.queue.map(c=>c.word), wi:learn.wi, dimIdx:learn.dimIdx,
+    results:learn.results, done:learn.done, resumeDim:learn.resumeDim, srsDone:learn.srsDone};
+  save();
 }
 function avgDim(w){ const d = dimsFor(w); return DIMS.reduce((s,k)=>s+d[k],0)/DIMS.length; }
 function doneList(word){ if(!learn.done[word]) learn.done[word]=[]; return learn.done[word]; }
@@ -3786,8 +3824,24 @@ function renderFlowDots(){
   document.getElementById("flow-dots").innerHTML = labels.map((l,i)=>{
     const dl = learn.done[learn.queue[learn.wi].word]||[];
     const cls = i<cur ? "done" : i===cur ? "cur" : "";
-    return `<span class="step-dot ${cls}">${i<cur||dl.includes(DIMS[i-1])?"✓":i+1}</span><span class="muted" style="font-size:12px;margin-right:6px">${l}</span>`;
+    return `<span class="step-dot ${cls}" data-i="${i}">${i<cur||dl.includes(DIMS[i-1])?"✓":i+1}</span><span class="muted" style="font-size:12px;margin-right:6px">${l}</span>`;
   }).join("");
+  // 已完成的环节可点击跳回（未完成的不可跳）
+  document.querySelectorAll("#flow-dots .step-dot.done").forEach(dot=>{
+    dot.style.cursor = "pointer";
+    dot.title = "点击回到该环节";
+    dot.onclick = ()=>{
+      const i = parseInt(dot.dataset.i, 10);
+      if(i === 0){ // 结构
+        learn.resumeDim = learn.dimIdx < 0 ? 0 : Math.min(learn.dimIdx, DIMS.length);
+        learn.dimIdx = -2;
+      }else{
+        learn.dimIdx = i - 1; // 五题型
+      }
+      saveDeep();
+      renderLearnStage();
+    };
+  });
 }
 
 function renderLearnStage(){
@@ -3816,9 +3870,10 @@ function renderLearnStage(){
     document.getElementById("btn-to-quiz").onclick = ()=>{
       if(isReturn){
         learn.dimIdx = learn.resumeDim;
-        if(learn.dimIdx>=DIMS.length){ renderWordSummary(); return; }
+        if(learn.dimIdx>=DIMS.length){ saveDeep(); renderWordSummary(); return; }
       } else learn.dimIdx = 0;
       learn.dimIdx = nextUnansweredIdx(card, learn.dimIdx);
+      saveDeep();
       renderLearnStage();
     };
     return;
@@ -3844,7 +3899,7 @@ function renderLearnStage(){
       </div>`;
   document.getElementById("snd-head").onclick = ()=>speak(q.transferWord || q.fullAnswer || q.card.word);
   if(state.settings && state.settings.autoSpeak) speak(q.transferWord || q.fullAnswer || q.card.word);
-  document.getElementById("l-struct").onclick = ()=>{ learn.resumeDim = learn.dimIdx; learn.dimIdx = -2; renderLearnStage(); };
+  document.getElementById("l-struct").onclick = ()=>{ learn.resumeDim = learn.dimIdx; learn.dimIdx = -2; saveDeep(); renderLearnStage(); };
   const box = document.getElementById("l-opts");
   q.options.forEach(opt=>{
     const val = typeof opt === "object" ? opt.v : opt;
@@ -3862,6 +3917,7 @@ function renderLearnStage(){
       if(!learn.done[card.word]) learn.done[card.word]=[];
       learn.done[card.word].push(q.dim);
       save();
+      saveDeep();
       dictLocked = false;
       const ex = document.getElementById("l-explain");
       ex.innerHTML = (ok?"✅ 答对了。":"❌ 答错了。") + "\n" + wrapWords(q.explain);
@@ -3871,7 +3927,7 @@ function renderLearnStage(){
     };
     box.appendChild(btn);
   });
-  document.getElementById("l-next").onclick = ()=>{ learn.dimIdx = nextUnansweredIdx(card, learn.dimIdx+1); renderLearnStage(); };
+  document.getElementById("l-next").onclick = ()=>{ learn.dimIdx = nextUnansweredIdx(card, learn.dimIdx+1); saveDeep(); renderLearnStage(); };
 }
 
 function renderWordSummary(){
@@ -3885,6 +3941,7 @@ function renderWordSummary(){
     srsRecord(card.word, q); // 深度训练一轮 = 一次记忆评分
     bumpStudyToday();
     addTodayWord(card.word);
+    saveDeep();
   }
   const d = dimsFor(card.word);
   const dimRows = DIMS.map(k=>{
@@ -3904,22 +3961,24 @@ function renderWordSummary(){
       <button class="btn" id="l-next-word">${learn.wi+1<learn.queue.length ? "学习下一个词 →" : "完成本轮 →"}</button>
     </div>`;
   document.getElementById("snd-sum").onclick = ()=>speak(card.word);
-  document.getElementById("l-review").onclick = ()=>{ learn.resumeDim = DIMS.length; learn.dimIdx = -2; renderLearnStage(); };
+  document.getElementById("l-review").onclick = ()=>{ learn.resumeDim = DIMS.length; learn.dimIdx = -2; saveDeep(); renderLearnStage(); };
   document.getElementById("l-next-word").onclick = ()=>{
     learn.wi++;
     if(learn.wi >= learn.queue.length){ finishLearning(); }
-    else { learn.dimIdx=-1; renderLearnStage(); }
+    else { learn.dimIdx=-1; saveDeep(); renderLearnStage(); }
   };
 }
 
 function finishLearning(){
   markDaily("deep"); // 深度训练完成一组 → 计入打卡条件
+  state.deepProg = null; save(); // 本轮完成，清除进度存档
   document.getElementById("learn-run").style.display="none";
   document.getElementById("quiz-end").style.display="block";
   const ok = learn.results.filter(r=>r.ok).length;
   document.getElementById("quiz-summary").innerHTML =
     `<p style="font-size:20px;margin-bottom:10px">本轮学了 ${learn.queue.length} 个词，答题 ${learn.results.length} 道，答对 ${ok}</p>
      <p class="muted">明天打开时，固定学习流会接着带你学新词；已学词的弱维度会穿插进来。建议隔几小时再用一次「快速复习」。</p>`;
+  resetAgainBtn();
 }
 
 /* ================= 快速复习 ================= */
@@ -3988,7 +4047,7 @@ function renderDash(){
   const btn = $("btn-today");
   if(fp){
     if(fp.i < fp.queue.length){ btn.textContent = "继续学习"; btn.disabled = false; }
-    else { btn.textContent = "已完成 ✓"; btn.disabled = true; }
+    else { btn.textContent = "再次学习"; btn.disabled = false; } // 已完成 → 可重复学习
   }else if(tp){ btn.textContent = "查看计划"; btn.disabled = false; }
   else { btn.textContent = "开始学习"; btn.disabled = false; }
   renderTodayWords();
@@ -4039,8 +4098,16 @@ $("btn-today").onclick = ()=>{
   const fp = (state.fcProg && state.fcProg.date===t) ? state.fcProg : null;
   const tp = (state.todayPlan && state.todayPlan.date===t) ? state.todayPlan : null;
   if(fp){
-    if(fp.i >= fp.queue.length) return; // 今日已完成
-    fc = {queue:fp.queue.slice(), i:fp.i, stats:Object.assign({}, fp.stats)};
+    if(fp.i >= fp.queue.length){ // 今日已完成 → 再次学习（去重后打乱重开一轮）
+      fc = newFcSession(fp.queue.filter((w,i,a)=>a.indexOf(w)===i));
+      saveFcProg();
+      pushHist();
+      backToStart(); $("quiz-start").style.display="none";
+      $("fc-run").style.display="block";
+      renderFc();
+      return;
+    }
+    fc = {queue:fp.queue.slice(), i:fp.i, stats:Object.assign({}, fp.stats), ratings:fp.ratings||{}};
     pushHist(); // 进入子流程：压一条历史供返回键拦截
     backToStart(); $("quiz-start").style.display="none";
     $("fc-run").style.display="block";
@@ -4057,14 +4124,49 @@ function rootOf(c){
   const m = String(c.root).match(/[a-zA-Z-]{2,}/);
   return m ? m[0].toLowerCase() : "";
 }
+const PICK_MODES = [
+  {v:"random", label:"随机抽取未学词"},
+  {v:"alpha",  label:"按首字母顺序"},
+  {v:"freq",   label:"按词频档抽取"}
+];
+const PICK_MODE_LABEL = {random:"随机抽取", alpha:"首字母顺序", freq:"词频档抽取"};
 function pickFresh(n){
+  const mode = (state.settings && state.settings.pickMode) || "random";
+  const cands = newCandidates();
+  // 首字母顺序：按字母表依次推进，可预期的学习路径
+  if(mode === "alpha"){
+    return cands.slice().sort((a,b)=>a.word.localeCompare(b.word)).slice(0, n)
+      .map(c=>({word:c.word, boost:false}));
+  }
+  // 词频档：候选按词库顺序（≈词频排名）均分 5 档，各档内随机抽取、按档等比例拼满 n
+  if(mode === "freq"){
+    const BANDS = 5, per = Math.ceil(n / BANDS);
+    const size = Math.max(1, Math.ceil(cands.length / BANDS));
+    const out = [];
+    for(let b=0; b<BANDS && out.length<n; b++){
+      const quota = Math.min(n, per*(b+1));
+      for(const c of shuffle(cands.slice(b*size, (b+1)*size))){
+        if(out.length >= quota) break;
+        out.push({word:c.word, boost:false});
+      }
+    }
+    if(out.length < n){ // 候选不足一档时兜底补齐
+      const used = new Set(out.map(o=>o.word));
+      for(const c of shuffle(cands.filter(c=>!used.has(c.word)))){
+        if(out.length >= n) break;
+        out.push({word:c.word, boost:false});
+      }
+    }
+    return out.slice(0, n);
+  }
+  // 随机（默认）：随机抽取未学词；与「正在学习、尚未掌握」的词同根（词根词缀）的新词优先，成组记忆
   const activeRoots = new Set();
   for(const c of library()){
     const r = srsOf(c.word);
     if(r && !srsMastered(r)){ const rt = rootOf(c); if(rt) activeRoots.add(rt); }
   }
   const boosted = [], plain = [];
-  for(const c of newCandidates()){ // 词库顺序即词频顺序，各自队列内部保持
+  for(const c of shuffle(cands)){
     (activeRoots.has(rootOf(c)) ? boosted : plain).push(c);
   }
   const out = [];
@@ -4076,7 +4178,11 @@ function pickFresh(n){
   return out;
 }
 function startToday(){
-  const due = shuffle(dueReviews());
+  // 到期复习按熟悉度从弱到强排序：最没把握的先复习（无记录按 0.5 计）
+  const due = dueReviews().sort((a,b)=>{
+    const fa = famScore(a.word), fb = famScore(b.word);
+    return (fa===null?0.5:fa) - (fb===null?0.5:fb);
+  });
   const p = planCounts();
   const freshPicked = pickFresh(p.freshN);
   plan = {
@@ -4103,15 +4209,14 @@ function renderPlan(){
   $("plan-body").innerHTML =
     `<p style="font-size:16px;margin-bottom:4px">共 <b>${plan.reviews.length+plan.fresh.length}</b> 词 = 复习 <b style="color:var(--warn)">${plan.reviews.length}</b> + 新词 <b style="color:var(--ok)">${plan.fresh.length}</b></p>` +
     (plan.reviews.length ? `<p class="muted" style="margin:12px 0 4px">复习（记忆曲线判定今日到期）</p><div>${plan.reviews.map(chip).join("")}</div>` : "") +
-    (plan.fresh.length ? `<p class="muted" style="margin:12px 0 4px">新词（词频优先 · 紫框 = 词根词缀与在学词同根，成组记忆）</p><div>${plan.fresh.map(chip).join("")}</div>` : "") +
+    (plan.fresh.length ? `<p class="muted" style="margin:12px 0 4px">新词（${PICK_MODE_LABEL[(state.settings&&state.settings.pickMode)||"random"]}${(state.settings&&state.settings.pickMode||"random")==="random" ? " · 紫框 = 词根词缀与在学词同根，成组记忆" : ""}）</p><div>${plan.fresh.map(chip).join("")}</div>` : "") +
     `<p class="muted" style="margin-top:12px">中途退出可随时从「继续学习」接着背。</p>`;
   $("fc-plan").style.display = "block";
 }
 $("btn-plan-ok").onclick = ()=>{
   for(const w of plan.fresh) markIntroduced(w);
-  fc = {queue: plan.reviews.concat(plan.fresh), i:0, stats:{know:0, vague:0, forgot:0}};
-  state.fcProg = {date:todayStr(), queue:fc.queue.slice(), i:0, stats:Object.assign({}, fc.stats)};
-  save();
+  fc = newFcSession(plan.reviews.concat(plan.fresh)); // 初始顺序打乱
+  saveFcProg();
   plan = null;
   $("fc-plan").style.display="none";
   $("fc-run").style.display="block";
@@ -4122,6 +4227,8 @@ $("btn-plan-back").onclick = ()=>{
   $("fc-plan").style.display="none";
   $("quiz-start").style.display="block"; renderDash();
 };
+/* 重新生成：清空今日计划并按当前选词方式重新抽取 */
+$("btn-plan-regen").onclick = ()=>{ state.todayPlan = null; save(); startToday(); };
 function renderFc(){
   const w = fc.queue[fc.i];
   const c = getCard(w);
@@ -4159,34 +4266,87 @@ function renderFc(){
     loadExample(w);
     box.onclick = null;
     $("fc-rate").style.display = "flex";
-    $("fc-hint").textContent = "对照释义，诚实评价刚才是否认识";
+    const rc = fc.ratings[w] || {k:0};
+    $("fc-hint").textContent = rc.done ? "本词已完成，诚实评价即可" : `对照释义诚实评价（本词已认识 ${rc.k} / 2 次）`;
   };
   $("fc-rate").style.display = "none";
   $("fc-hint").textContent = "先回忆词义，再点击卡片核对";
 }
+/* ===== 熟悉度画像：记录每次学习中的认识/模糊/不认识，驱动间隔重现、复习选题与计划调整 ===== */
+function famRecord(w, q){
+  if(!state.fam) state.fam = {};
+  const f = state.fam[w] || (state.fam[w] = {k:0, v:0, f:0, days:{}});
+  const t = todayStr();
+  const d = f.days[t] || (f.days[t] = {k:0, v:0, f:0});
+  if(q===5){ f.k++; d.k++; } else if(q===3){ f.v++; d.v++; } else { f.f++; d.f++; }
+  f.updated = Date.now();
+}
+function famScore(w){ // 0..1 越熟越高；无记录 → null
+  const f = state.fam && state.fam[w];
+  const n = f ? (f.k + f.v + f.f) : 0;
+  return n ? (f.k + 0.5*f.v)/n : null;
+}
+/* 新一轮学习会话：词序打乱；每词需两次「认识」才完成，未完成的按间隔规律重现 */
+function newFcSession(words){
+  return {queue: shuffle(words.slice()), i:0, stats:{know:0, vague:0, forgot:0}, ratings:{}};
+}
+function saveFcProg(){
+  if(!fc) return;
+  state.fcProg = {date:todayStr(), queue:fc.queue.slice(), i:fc.i, stats:Object.assign({}, fc.stats), ratings:fc.ratings};
+  save();
+}
+/* 间隔重现规律（扩展提取练习）：回忆越困难重现越快——不认识≈隔 3 张，模糊≈隔 5 张，首次认识≈隔 7 张；
+   ±1 随机抖动避免顺序僵化，且保证不连续重复出现 */
+const FC_GAP = {1:3, 3:5, 5:7};
 function rateFc(q){ // 认识=5 模糊=3 不认识=1
-  addTodayWord(fc.queue[fc.i]);
-  srsRecord(fc.queue[fc.i], q);
-  bumpStudyToday();
-  if(q===5) fc.stats.know++; else if(q===3) fc.stats.vague++; else fc.stats.forgot++;
+  const w = fc.queue[fc.i];
+  const rec = fc.ratings[w] || (fc.ratings[w] = {k:0, v:0, f:0, done:false});
+  if(q===5){ rec.k++; fc.stats.know++; } else if(q===3){ rec.v++; fc.stats.vague++; } else { rec.f++; fc.stats.forgot++; }
+  famRecord(w, q);
+  if(rec.k >= 2 && !rec.done){
+    // 完成：按本次会话综合表现记一次记忆曲线评分（有不认识→3，有模糊→4，全认识→5）
+    rec.done = true;
+    addTodayWord(w);
+    srsRecord(w, rec.f>0 ? 3 : rec.v>0 ? 4 : 5);
+    bumpStudyToday();
+  }else if(!rec.done){
+    const gap = Math.max(2, FC_GAP[q] + Math.floor(Math.random()*3) - 1);
+    fc.queue.splice(Math.min(fc.i + gap, fc.queue.length), 0, w);
+  }
   fc.i++;
-  if(state.fcProg){ state.fcProg.i = fc.i; state.fcProg.stats = Object.assign({}, fc.stats); save(); }
+  saveFcProg();
   if(fc.i >= fc.queue.length) finishFc(); else renderFc();
 }
 $("fc-know").onclick = ()=>rateFc(5);
 $("fc-vague").onclick = ()=>rateFc(3);
 $("fc-forgot").onclick = ()=>rateFc(1);
 function finishFc(){
-  state.fcProg = {date:todayStr(), queue:fc.queue.slice(), i:fc.queue.length, stats:Object.assign({}, fc.stats)};
-  save();
+  saveFcProg();
   $("fc-run").style.display="none";
   $("quiz-end").style.display="block";
+  const words = Object.keys(fc.ratings).length;
   $("quiz-summary").innerHTML =
-    `<p style="font-size:20px;margin-bottom:10px">今日学习完成：共 ${fc.queue.length} 词</p>` +
+    `<p style="font-size:20px;margin-bottom:10px">今日学习完成：${words} 词全部达到「两次认识」</p>` +
     `<p>认识 <b style="color:var(--ok)">${fc.stats.know}</b> · 模糊 <b style="color:var(--warn)">${fc.stats.vague}</b> · 不认识 <b style="color:var(--bad)">${fc.stats.forgot}</b></p>` +
-    `<p class="muted">已按记忆曲线排定下次复习日期——「不认识」的词明天还会来找你。</p>`;
+    `<p class="muted">已按记忆曲线排定下次复习日期——每次选择都已记入熟悉度画像，影响后续复习与计划。</p>`;
+  const again = $("btn-again");
+  again.textContent = "再次学习";
+  again.onclick = startFcAgain;
 }
-$("btn-again").onclick = ()=>{ $("quiz-end").style.display="none"; $("quiz-start").style.display="block"; };
+/* 再次学习：今日词去重后重新打乱，仍按「两次认识 + 间隔重现」规则进行 */
+function startFcAgain(){
+  fc = newFcSession(fc.queue.filter((w,i,a)=>a.indexOf(w)===i));
+  saveFcProg();
+  $("quiz-end").style.display="none";
+  $("fc-run").style.display="block";
+  renderFc();
+}
+function resetAgainBtn(){
+  const b = $("btn-again");
+  b.textContent = "再来一组";
+  b.onclick = ()=>{ $("quiz-end").style.display="none"; $("quiz-start").style.display="block"; };
+}
+resetAgainBtn();
 $("btn-tostats").onclick = ()=>goView("stats");
 $("btn-next").onclick = nextQuestion;
 $("btn-structure").onclick = ()=>openModal(renderCardHTML(session.qs[session.i].card));
@@ -4285,6 +4445,7 @@ function nextQuestion(){
     $("quiz-summary").innerHTML =
       `<p style="font-size:20px;margin-bottom:10px">答对 ${session.right} / ${session.qs.length}</p>` +
       `<p class="muted">维度强度已更新：答对的维度上升 12%，答错的维度腰斩。下次练习会优先抽你最弱的维度。</p>`;
+    resetAgainBtn();
   } else { saveQuizProg(); renderQuestion(); }
 }
 
@@ -4490,12 +4651,20 @@ function renderQStats(){
 function renderQLset(){
   const s = state.settings || (state.settings = {dailyTotal:10});
   setPickLabel("q-daily-pick", (s.dailyTotal || 10) + " 词");
+  setPickLabel("q-pickmode-pick", PICK_MODE_LABEL[s.pickMode || "random"]);
   setPickLabel("q-learn-pick", learnN + " 词");
   setPickLabel("q-session-pick", sessionN + " 题");
   updateDictSrcUI();
   $("q-autosnd-chk").classList.toggle("on", !!s.autoSpeak);
 }
 $("row-update").onclick = ()=>checkUpdate(true);
+$("q-pickmode-pick").onclick = ()=>openPicker("选词方式", [
+  {v:"random", label:"随机抽取未学词（同根词优先）"},
+  {v:"alpha",  label:"按首字母顺序（A → Z）"},
+  {v:"freq",   label:"按词频档抽取（5 档均衡随机）"}
+], (state.settings && state.settings.pickMode) || "random", v=>{
+  state.settings.pickMode = v; save(); setPickLabel("q-pickmode-pick", PICK_MODE_LABEL[v]);
+});
 $("q-daily-pick").onclick = ()=>openPicker("每日词汇学习量", [5,10,15,20,25,30,35,40,45,50].map(v=>({v, label:v+" 词"})), (state.settings && state.settings.dailyTotal) || 10, v=>{
   state.settings.dailyTotal = parseInt(v,10);
   save(); setPickLabel("q-daily-pick", state.settings.dailyTotal+" 词"); renderSettingsView(); renderDash();

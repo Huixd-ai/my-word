@@ -421,8 +421,9 @@
   .pick-field .pv{display:inline-block; max-width:max(120px, calc(46vw - 56px)); overflow:hidden; white-space:nowrap; vertical-align:bottom;}
   .mr-pick .pv{max-width:max(120px, calc(44vw - 56px));}
   .pick-field .pv-in{display:inline-block; white-space:nowrap;}
-  .pick-field .pv.marquee .pv-in{animation:mq 5.5s ease-in-out infinite alternate;}
-  @keyframes mq{0%,14%{transform:translateX(0);} 86%,100%{transform:translateX(var(--mq-shift,0));}}
+  .pick-field .pv.marquee .pv-in{animation:mqloop var(--mq-dur,6s) linear infinite;}
+  @keyframes mqloop{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+  .mq-gap{display:inline-block; width:var(--mq-gap,52px);}
   /* ===== 注释改ⓘ弹窗 / 副标题单行 ===== */
   .mr-sub{white-space:nowrap; overflow:hidden;}
   .info-dot{display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; border:1.5px solid var(--dim); color:var(--dim); background:transparent; font-size:11px; font-weight:700; margin-left:7px; cursor:pointer; vertical-align:2px; font-family:inherit; padding:0; flex-shrink:0;}
@@ -442,9 +443,10 @@
   #fc-head .snd-btn, #quiz-head .snd-btn{min-width:0; max-width:100%; margin-left:0 !important; overflow:hidden;}
   #fc-head .snd-btn span, #quiz-head .snd-btn span{overflow:hidden; white-space:nowrap; display:inline-block; max-width:100%; vertical-align:bottom;}
   #quiz-head .muted{float:none !important; margin-left:auto; flex-shrink:0;}
-  /* 通用滚动视图 */
+  /* 通用滚动视图：单向循环播放（内容×2 + 首尾间隔，头尾相接） */
   .mq-in{display:inline-block; white-space:nowrap;}
-  .marquee .mq-in{animation:mq 5.5s ease-in-out infinite alternate;}
+  .mq-a{display:inline-block; white-space:nowrap;}
+  .marquee .mq-in{animation:mqloop var(--mq-dur,6s) linear infinite;}
 </style>
 </head>
 <body>
@@ -613,11 +615,6 @@
           <span class="mr-name">自动播放语音<span class="mr-sub">学习卡片与题目出现时朗读单词</span></span>
           <span class="chk" id="q-autosnd-chk" style="margin-left:2px"><span class="circle"></span></span>
         </div>
-        <div class="menu-row" id="row-update" style="cursor:pointer">
-          <span class="mr-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></span>
-          <span class="mr-name">检查更新<span class="mr-sub" id="q-update-ver">当前版本 v1.1.0</span></span>
-          <span class="chev2">›</span>
-        </div>
       </div>
     </div>
   </div>
@@ -713,6 +710,14 @@
         <span class="mr-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
         <span class="mr-name">通知权限</span>
         <button class="btn ghost mr-pick" id="btn-notif">申请权限</button>
+      </div>
+    </div>
+    <h2 class="section-title">软件</h2>
+    <div class="card menu-card">
+      <div class="menu-row" id="row-update" style="cursor:pointer">
+        <span class="mr-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></span>
+        <span class="mr-name">检查更新<span class="mr-sub" id="q-update-ver">当前版本 v1.1.2</span></span>
+        <span class="chev2">›</span>
       </div>
     </div>
     <p class="muted" style="margin-top:14px;padding:0 6px">英式音标已内置（离线可用）；例句注释在联网时自动加载并本地缓存。</p>
@@ -3173,7 +3178,7 @@ const LS_KEY = "wordTrainer.v1";
    原理：APK 只是壳，页面本体可热替换。服务器上放 version.json：
    {"version":"1.1.1","html":"<新版 index.html 的下载地址>","note":"更新说明"}
    应用启动时静默检查；发现新版本则弹窗，确认后下载并写入应用私有目录，重启即新版。 */
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.2";
 /* 更新地址：raw 为主（版本信息最新），jsdelivr CDN 为备用（国内更稳但有缓存延迟） */
 const UPDATE_MANIFESTS = [
   "https://raw.githubusercontent.com/Huixd-ai/my-word/main/version.json",
@@ -3704,31 +3709,45 @@ function setPickLabel(id, text){
   const el = $(id); if(!el) return;
   const pv = el.querySelector(".pv");
   pv.classList.remove("marquee");
-  pv.style.removeProperty("--mq-shift");
   pv.innerHTML = `<span class="pv-in"></span>`;
   const inner = pv.querySelector(".pv-in");
   inner.textContent = text;
   const over = inner.scrollWidth - pv.clientWidth; // 同步测量即可（scrollWidth 会强制排版），不依赖 rAF
   if(over > 2){
-    pv.style.setProperty("--mq-shift", (-over)+"px");
+    // 单向循环：内容×2 + 首尾间隔，头尾相接播放
+    inner.innerHTML = "";
+    for(let i=0;i<2;i++){
+      const a = document.createElement("span"); a.textContent = text;
+      const g = document.createElement("i"); g.className = "mq-gap";
+      inner.append(a, g);
+    }
+    const half = inner.scrollWidth / 2;
+    pv.style.setProperty("--mq-dur", Math.max(3, half/45)+"s"); // 约 45px/s 匀速
     pv.classList.add("marquee");
   }
 }
-/* 通用滚动视图：任意元素内容超宽时自动左右滚动播放（替代省略号） */
+/* 通用滚动视图：任意元素内容超宽时自动单向循环滚动播放（替代省略号） */
 function autoScroll(el){
   if(!el) return;
   const old = el.querySelector(".mq-in");
-  const content = old ? old.innerHTML : el.innerHTML;
+  const content = old ? (old.querySelector(".mq-a") ? old.querySelector(".mq-a").innerHTML : old.innerHTML) : el.innerHTML;
   el.classList.remove("marquee");
-  el.style.removeProperty("--mq-shift");
   el.innerHTML = "";
   const inner = document.createElement("span");
   inner.className = "mq-in";
-  inner.innerHTML = content;
+  const a = document.createElement("span");
+  a.className = "mq-a";
+  a.innerHTML = content;
+  inner.appendChild(a);
   el.appendChild(inner);
-  const over = inner.scrollWidth - el.clientWidth;
+  const over = a.scrollWidth - el.clientWidth;
   if(over > 2){
-    el.style.setProperty("--mq-shift", (-over)+"px");
+    const g1 = document.createElement("i"); g1.className = "mq-gap";
+    const b = a.cloneNode(true);
+    const g2 = document.createElement("i"); g2.className = "mq-gap";
+    inner.append(g1, b, g2);
+    const half = inner.scrollWidth / 2;
+    el.style.setProperty("--mq-dur", Math.max(3, half/45)+"s");
     el.classList.add("marquee");
   }
 }
@@ -4475,7 +4494,6 @@ function renderQLset(){
   setPickLabel("q-session-pick", sessionN + " 题");
   updateDictSrcUI();
   $("q-autosnd-chk").classList.toggle("on", !!s.autoSpeak);
-  $("q-update-ver").textContent = `当前版本 v${APP_VERSION}${isAndroidShell()?"":"（网页版）"}`;
 }
 $("row-update").onclick = ()=>checkUpdate(true);
 $("q-daily-pick").onclick = ()=>openPicker("每日词汇学习量", [5,10,15,20,25,30,35,40,45,50].map(v=>({v, label:v+" 词"})), (state.settings && state.settings.dailyTotal) || 10, v=>{
@@ -4899,6 +4917,7 @@ function renderSettingsView(){
   $("remind-chk").classList.toggle("on", !!(state.settings && state.settings.remindOn));
   updateNotifStatus();
   updateDictSrcUI();
+  $("q-update-ver").textContent = `当前版本 v${APP_VERSION}${isAndroidShell()?"":"（网页版）"}`;
 }
 function syncNativeRemind(){
   if(!window.XXApp) return;

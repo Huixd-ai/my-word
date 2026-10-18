@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "html": "https://raw.githubusercontent.com/Huixd-ai/my-word/main/index.html",
-  "note": "当前版本"
+  "note": "「已是最新版本 / 更新完成」提示改为底部轻量消息条：约 2 秒自动消失，不遮挡操作。"
 }

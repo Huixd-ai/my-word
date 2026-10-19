@@ -398,6 +398,10 @@
   .qw-dots{display:flex; gap:4px; flex-shrink:0; align-items:center;}
   .qw-dots i{width:6px; height:6px; border-radius:50%; background:var(--line);}
   .qw-dots i.on{background:var(--ok);}
+  .dw-idx{width:30px; flex-shrink:0; color:var(--dim); font-size:13px; text-align:right; font-variant-numeric:tabular-nums;}
+  .dw-word{font-size:16.5px; font-weight:600; flex-shrink:0;}
+  .dw-gloss{flex:1; min-width:0; color:var(--dim); font-size:14px; overflow:hidden; white-space:nowrap; text-overflow:clip;}
+  .dw-row{cursor:pointer;}
   /* ===== 进度统计 · 近七天条形图 ===== */
   .qs-bars{display:flex; align-items:flex-end; gap:7px; height:118px; margin:14px 0 4px; padding:0 2px;}
   .qs-bar{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:5px; min-width:0; height:100%;}
@@ -500,6 +504,11 @@
           <span class="mr-name">快速复习<span class="mr-sub">永远优先抽你最弱的维度 · 题数在学习设置中调整</span></span>
           <span class="chev2">›</span>
         </div>
+        <div class="menu-row" id="row-deepwords">
+          <span class="mr-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+          <span class="mr-name">抽象词列表<span class="mr-sub">深度训练词库 · 点击单词看完整卡片</span></span>
+          <span class="chev2">›</span>
+        </div>
       </div>
       <h2 class="section-title">学习进度</h2>
       <div class="card menu-card">
@@ -591,6 +600,14 @@
         <h3 style="margin-top:0" id="q-words-title"></h3>
         <p class="muted" id="q-words-info" style="margin-bottom:8px"></p>
         <div id="q-words-list"></div>
+      </div>
+    </div>
+    <div id="q-deepwords" style="display:none">
+      <div class="card">
+        <div class="row" style="justify-content:flex-start;margin:0 0 14px"><button class="exit-btn" id="btn-exit-deepwords" aria-label="返回上一级" title="返回上一级"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg></button></div>
+        <h3 style="margin-top:0">抽象词列表</h3>
+        <p class="muted" style="margin-bottom:8px">深度训练词库 · 点击单词查看完整卡片（语义核 / 搭配 / 词根词缀）</p>
+        <div id="q-deepwords-list"></div>
       </div>
     </div>
     <div id="q-stats" style="display:none">
@@ -696,7 +713,7 @@
       <div class="row" style="justify-content:space-between;align-items:center;margin:2px 0 8px">
         <button class="btn ghost" id="btn-cal-prev" style="padding:6px 16px;font-size:15px" aria-label="上个月">‹</button>
         <span class="muted" id="ci-month" style="margin:0"></span>
-        <button class="btn ghost" id="btn-cal-next" style="padding:6px 16px;font-size:15px" aria-label="下个月">›</button>
+        <span style="display:inline-flex;align-items:center;gap:8px"><span class="link-btn" id="btn-cal-today" style="display:none;font-size:13px">回到今天</span><button class="btn ghost" id="btn-cal-next" style="padding:6px 16px;font-size:15px" aria-label="下个月">›</button></span>
       </div>
       <div class="ci-cal" id="ci-cal"></div>
     </div>
@@ -3201,7 +3218,7 @@ const LS_KEY = "wordTrainer.v1";
    原理：APK 只是壳，页面本体可热替换。服务器上放 version.json：
    {"version":"1.1.1","html":"<新版 index.html 的下载地址>","note":"更新说明"}
    应用启动时静默检查；发现新版本则弹窗，确认后下载并写入应用私有目录，重启即新版。 */
-const APP_VERSION = "1.1.7";
+const APP_VERSION = "1.1.8";
 /* 更新地址：raw 为主（版本信息最新），jsdelivr CDN 为备用（国内更稳但有缓存延迟） */
 const UPDATE_MANIFESTS = [
   "https://raw.githubusercontent.com/Huixd-ai/my-word/main/version.json",
@@ -3920,8 +3937,11 @@ function renderLearnStage(){
   // 阶段二：依次五题型
   const dim = DIMS[learn.dimIdx];
   const q = makeQuestion(card, dim);
-  if(!q){ doneList(card.word).push(dim); learn.dimIdx = nextUnansweredIdx(card, learn.dimIdx+1); renderLearnStage(); return; }
+  if(!q){ const dl = doneList(card.word); if(!dl.includes(dim)) dl.push(dim); learn.dimIdx = nextUnansweredIdx(card, learn.dimIdx+1); renderLearnStage(); return; }
   const notes = optionNotes(q);
+  // 已答过的题型（圆圈跳回）：直接展示当时的作答结果，锁定不重答、不重复计分
+  const prev = (learn.done[card.word]||[]).includes(dim)
+    ? [...learn.results].reverse().find(r=>r.word===card.word && r.dim===dim) : null;
   body.innerHTML = `${prog}<span class="badge">${DIM_NAME[dim]}</span>
       <span class="muted" style="font-size:12px">${DIM_DESC[dim]}</span>
       <div class="row" style="margin-top:6px">${sndBtn(card.word).replace("snd-btn","snd-btn\" id=\"snd-head")}</div>
@@ -3941,7 +3961,11 @@ function renderLearnStage(){
     const val = typeof opt === "object" ? opt.v : opt;
     const btn = document.createElement("button");
     btn.className = "opt"; btn.innerHTML = wrapWords(val);
-    btn.onclick = ()=>{
+    if(prev){ // 回看做答：锁定并重现当时的选择与对错
+      btn.classList.add("lock");
+      if(btn.textContent === q.answer) btn.classList.add("ok");
+      if(!prev.ok && btn.textContent === prev.pick) btn.classList.add("bad");
+    }else btn.onclick = ()=>{
       const ok = val === q.answer;
       box.querySelectorAll(".opt").forEach(b=>{ b.classList.add("lock"); b.onclick=null;
         if(b.textContent === q.answer) b.classList.add("ok"); });
@@ -3949,7 +3973,7 @@ function renderLearnStage(){
       const d = dimsFor(card.word);
       d[q.dim] = ok ? Math.min(1, d[q.dim]+0.12) : Math.max(0, d[q.dim]*0.5);
       state.log.push({t:Date.now(), w:card.word, d:q.dim, ok});
-      learn.results.push({word:card.word, dim:q.dim, ok});
+      learn.results.push({word:card.word, dim:q.dim, ok, pick:val});
       if(!learn.done[card.word]) learn.done[card.word]=[];
       learn.done[card.word].push(q.dim);
       save();
@@ -3963,6 +3987,15 @@ function renderLearnStage(){
     };
     box.appendChild(btn);
   });
+  if(prev){
+    const ex = document.getElementById("l-explain");
+    ex.innerHTML = (prev.ok?"✅ 答对了。":"❌ 答错了。") + "\n" + wrapWords(q.explain);
+    ex.style.display = "block";
+    if(notes) document.getElementById("l-optnotes").style.display = "block";
+    const nx = document.getElementById("l-next");
+    nx.textContent = "返回继续";
+    nx.style.display = "inline-block";
+  }
   document.getElementById("l-next").onclick = ()=>{ learn.dimIdx = nextUnansweredIdx(card, learn.dimIdx+1); saveDeep(); renderLearnStage(); };
 }
 
@@ -4023,13 +4056,14 @@ $("btn-start").onclick = startQuiz;
 function exitRound(){
   learn = null; session = null; fc = null; plan = null; dictLocked = false;
   $("learn-run").style.display="none"; $("quiz-run").style.display="none"; $("fc-run").style.display="none"; $("fc-plan").style.display="none"; $("quiz-end").style.display="none";
-  $("q-words").style.display="none"; $("q-stats").style.display="none"; $("q-lset").style.display="none";
+  $("q-words").style.display="none"; $("q-stats").style.display="none"; $("q-lset").style.display="none"; $("q-deepwords").style.display="none";
   $("quiz-start").style.display="block"; updatePoolInfo(); renderDash();
 }
 $("btn-exit-learn").onclick = exitRound;
 $("btn-exit-quiz").onclick = exitRound;
 $("btn-exit-fc").onclick = exitRound;
 $("btn-exit-words").onclick = exitRound;
+$("btn-exit-deepwords").onclick = exitRound;
 $("btn-exit-qstats").onclick = exitRound;
 $("btn-exit-lset").onclick = exitRound;
 /* 学习页内的子页面（单词列表/进度统计/学习设置）：与学习子流程同级，返回键可退回学习主页 */
@@ -4090,6 +4124,7 @@ function renderDash(){
 }
 $("hero-change").onclick = ()=>goView("lib");
 $("row-lib").onclick = ()=>{ openQuizSub("q-words"); renderQWords(); };
+$("row-deepwords").onclick = ()=>{ openQuizSub("q-deepwords"); renderDeepWords(); };
 $("row-stats").onclick = ()=>{ openQuizSub("q-stats"); renderQStats(); };
 $("row-settings").onclick = ()=>{ openQuizSub("q-lset"); renderQLset(); };
 $("row-learn").onclick = ()=>$("btn-learn").click();
@@ -4781,10 +4816,28 @@ function renderQWords(){
     e.stopPropagation(); speak(btn.dataset.w);
   });
 }
+/* 抽象词列表：深度训练词库全部完整卡片，序号 + 单词 + 词性译注，点开看完整卡片 */
+function renderDeepWords(){
+  const cards = BUILTIN.filter(c=>!state.deleted.includes(c.word) && cardComplete(c));
+  $("q-deepwords-list").innerHTML = cards.map((c,i)=>{
+    const pos = wordPOS(c.word, c) || "";
+    return `<div class="qw-row dw-row" data-w="${esc(c.word)}">` +
+      `<span class="dw-idx">${i+1}</span>` +
+      `<button class="snd-mini qw-snd" data-w="${esc(c.word)}" title="播放英音">${SND}</button>` +
+      `<span class="dw-word">${esc(c.word)}</span>` +
+      `<span class="dw-gloss">${esc((pos ? pos+" · " : "") + (c.gloss||""))}</span></div>`;
+  }).join("");
+  $("q-deepwords-list").querySelectorAll(".qw-snd").forEach(btn=>btn.onclick = e=>{
+    e.stopPropagation(); speak(btn.dataset.w);
+  });
+  $("q-deepwords-list").querySelectorAll(".dw-row").forEach(row=>row.onclick = ()=>{
+    const c = BUILTIN.find(x=>x.word===row.dataset.w);
+    if(c) openModal(renderCardHTML(c));
+  });
+}
 function renderQStats(){
   const dayLog = dstr => state.log.filter(l=>todayStr(new Date(l.t))===dstr);
-  const t = dayKey();
-  const tl = dayLog(t);
+  const t = dayKey();  const tl = dayLog(t);
   const tok = tl.filter(l=>l.ok).length;
   const newToday = ((state.todayWords||{})[t]||[]).length;
   const studied = (state.studyToday||{})[t]||0;
@@ -5147,6 +5200,7 @@ function renderCheckin(){
   $("ci-month").textContent = `${y} 年 ${mo+1} 月 · 绿底 = 已打卡 · 黄底 = 请假`;
   $("btn-cal-next").disabled = calOffset >= 0;
   $("btn-cal-next").style.opacity = calOffset >= 0 ? .35 : 1;
+  $("btn-cal-today").style.display = calOffset < 0 ? "" : "none";
   const first = new Date(y, mo, 1), startDay = (first.getDay()+6)%7, dim = new Date(y, mo+1, 0).getDate();
   const WK = ["一","二","三","四","五","六","日"];
   let cells = WK.map(w=>`<div class="ci-head">${w}</div>`).join("");
@@ -5165,6 +5219,7 @@ function renderCheckin(){
 let calOffset = 0;
 $("btn-cal-prev").onclick = ()=>{ calOffset--; renderCheckin(); };
 $("btn-cal-next").onclick = ()=>{ if(calOffset < 0){ calOffset++; renderCheckin(); } };
+$("btn-cal-today").onclick = ()=>{ calOffset = 0; renderCheckin(); };
 $("btn-checkin").onclick = ()=>{
   const t = dayKey();
   const studied = (state.studyToday||{})[t]||0;
@@ -5420,7 +5475,7 @@ function goView(v){
 }
 document.querySelectorAll("#tabbar button").forEach(b=>b.onclick = ()=>goView(b.dataset.v));
 function quizSubOpen(){
-  return ["fc-plan","fc-run","learn-run","quiz-run","quiz-end","q-words","q-stats","q-lset"].some(id=>$(id).style.display === "block");
+  return ["fc-plan","fc-run","learn-run","quiz-run","quiz-end","q-words","q-stats","q-lset","q-deepwords"].some(id=>$(id).style.display === "block");
 }
 window.addEventListener("popstate", ()=>{
   if($("modal-mask").style.display === "block"){

@@ -23,7 +23,7 @@
   html,body{overflow-x:hidden; overflow-x:clip; overscroll-behavior:none;}
   body{background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"HarmonyOS Sans SC","HarmonyOS Sans","MiSans","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif; min-height:100vh; line-height:1.6; letter-spacing:.01em; text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; touch-action:manipulation; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
   input, textarea, [contenteditable]{-webkit-user-select:text; user-select:text; -webkit-touch-callout:default;}
-  #tabbar{position:fixed; bottom:0; left:0; right:0; display:flex; background:rgba(24,27,36,.98); border-top:1px solid var(--line); z-index:40; padding-bottom:env(safe-area-inset-bottom,0);}
+  #tabbar{position:fixed; bottom:0; left:0; right:0; display:flex; background:rgba(24,27,36,.98); border-top:1px solid var(--line); z-index:40; padding-bottom:var(--sa-bottom, env(safe-area-inset-bottom, 0px));}
   #tabbar button{flex:1; background:transparent; border:none; color:var(--dim); padding:9px 2px 8px; font-size:11px; letter-spacing:.05em; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; transition:color .15s; font-family:inherit;}
   #tabbar button .ti{display:inline-flex; line-height:1; border-radius:12px; padding:4px 10px; transition:transform .18s cubic-bezier(.34,1.4,.64,1), background .18s;}
   #tabbar button .ti svg{width:22px; height:22px;}
@@ -109,7 +109,7 @@
   .bar{height:100%; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .4s;}
   .modal-mask{position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; z-index:50; overflow-y:auto; padding:40px 16px;}
   /* 轻量消息条：底部浮出、自动消失、不拦截操作 */
-  #toast{position:fixed; left:50%; bottom:calc(88px + env(safe-area-inset-bottom,0)); transform:translateX(-50%) translateY(16px); z-index:80;
+  #toast{position:fixed; left:50%; bottom:calc(88px + var(--sa-bottom, env(safe-area-inset-bottom, 0px))); transform:translateX(-50%) translateY(16px); z-index:80;
     background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:999px; padding:10px 20px;
     font-size:13.5px; line-height:1.4; max-width:86vw; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,.45);
     opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;}
@@ -370,7 +370,7 @@
   body.re0 .btn-start-big{box-shadow:0 4px 14px rgba(138,63,252,.3);}
   body.re0 .hero{background:linear-gradient(135deg,#ffffff 55%,#efe4fd); border-color:#d3bdf0;}
   /* ===== 学习主页（卡片式仪表盘布局） ===== */
-  .page-title{font-size:26px; font-weight:800; letter-spacing:.02em; margin:calc(-1 * env(safe-area-inset-top,0)) -18px 10px; padding:calc(4px + env(safe-area-inset-top,0)) 18px 10px; position:sticky; top:0; z-index:30; background:var(--bg);}
+  .page-title{font-size:26px; font-weight:800; letter-spacing:.02em; margin:calc(-1 * var(--sa-top, env(safe-area-inset-top, 0px))) -18px 10px; padding:calc(4px + var(--sa-top, env(safe-area-inset-top, 0px))) 18px 10px; position:sticky; top:0; z-index:30; background:var(--bg);}
   .section-title{font-size:18px; font-weight:700; margin:24px 0 12px; letter-spacing:.01em;}
   .hero{padding:20px 22px;}
   .hero-top{display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:32px;}
@@ -434,9 +434,9 @@
   #tabbar button{font-size:0; gap:0;}
   #tabbar button.on{font-size:11px; gap:4px;}
   /* ===== 沉浸式全屏安全区 ===== */
-  body{padding-top:env(safe-area-inset-top,0);}
-  #remind-banner{top:env(safe-area-inset-top,0);}
-  .modal-mask{padding-top:calc(40px + env(safe-area-inset-top,0));}
+  body{padding-top:var(--sa-top, env(safe-area-inset-top, 0px));}
+  #remind-banner{top:var(--sa-top, env(safe-area-inset-top, 0px));}
+  .modal-mask{padding-top:calc(40px + var(--sa-top, env(safe-area-inset-top, 0px)));}
   /* ===== 选择器长文本自动滚动（外层裁剪、内层位移） ===== */
   .pick-field{max-width:46vw; flex-shrink:0;}
   .mr-pick{max-width:44vw;}
@@ -3746,7 +3746,7 @@ const LS_KEY = "wordTrainer.v1";
    原理：APK 只是壳，页面本体可热替换。服务器上放 version.json：
    {"version":"1.1.1","html":"<新版 index.html 的下载地址>","note":"更新说明"}
    应用启动时静默检查；发现新版本则弹窗，确认后下载并写入应用私有目录，重启即新版。 */
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 /* 更新地址：raw 为主（版本信息最新），jsdelivr CDN 为备用（国内更稳但有缓存延迟） */
 const UPDATE_MANIFESTS = [
   "https://raw.githubusercontent.com/Huixd-ai/my-word/main/version.json",
@@ -3759,6 +3759,13 @@ const UPDATE_HTML_URLS = [
   "https://cdn.jsdelivr.net/gh/Huixd-ai/my-word@main/index.html"
 ];
 function isAndroidShell(){ return typeof XXApp !== "undefined" && typeof XXApp.applyUpdate === "function"; }
+/* 安卓壳安全区：WebView 不支持 env(safe-area-inset-*)，由原生层通过 __setSa 注入真实像素值 */
+window.__setSa = function(t, b){
+  const rs = document.documentElement.style;
+  rs.setProperty("--sa-top", Math.max(0, t|0) + "px");
+  rs.setProperty("--sa-bottom", Math.max(0, b|0) + "px");
+};
+if(isAndroidShell()){ try{ XXApp.requestInsets && XXApp.requestInsets(); }catch(e){} }
 function cmpVer(a, b){
   const pa = String(a).split(".").map(x=>parseInt(x,10)||0), pb = String(b).split(".").map(x=>parseInt(x,10)||0);
   for(let i=0;i<Math.max(pa.length,pb.length);i++){

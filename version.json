@@ -1,5 +1,5 @@
 {
-  "version": "1.2.2",
+  "version": "1.2.3",
   "html": "https://raw.githubusercontent.com/Huixd-ai/my-word/main/index.html",
-  "note": "修复全面屏适配：顶部标题不再被状态栏图标压住、底部导航文字不再被手势条裁切——此项为应用外壳改动，需安装新版安装包后生效（安装后本页面内容会自动保持最新）。"
+  "note": "内置词典全面升级：离线可查 2.8 万词条（开源 ECDICT），含多义项释义、音标、词性、柯林斯星级和考试标签；支持词形还原（点 went 直接看 go）；Wiktionary 在线查询改为手动触发，不再卡顿。"
 }

@@ -1,5 +1,5 @@
 {
-  "version": "1.2.3",
+  "version": "1.2.4",
   "html": "https://raw.githubusercontent.com/Huixd-ai/my-word/main/index.html",
-  "note": "内置词典全面升级：离线可查 2.8 万词条（开源 ECDICT），含多义项释义、音标、词性、柯林斯星级和考试标签；支持词形还原（点 went 直接看 go）；Wiktionary 在线查询改为手动触发，不再卡顿。"
+  "note": "新增激励系统：① GitHub 风格学习热力图（打卡页顶部，近半年学习强度一目了然，点格子看每日详情）；② 成就徽章墙（首批 15 枚：连续打卡、累计词次、深度训练、单日百词等，达成自动弹出解锁动画）。"
 }

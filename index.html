@@ -111,7 +111,7 @@
   /* 轻量消息条：底部浮出、自动消失、不拦截操作 */
   #toast{position:fixed; left:50%; bottom:calc(88px + var(--sa-bottom, env(safe-area-inset-bottom, 0px))); transform:translateX(-50%) translateY(16px); z-index:80;
     background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:999px; padding:10px 20px;
-    font-size:13.5px; line-height:1.4; max-width:86vw; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,.45);
+    font-size:13.5px; line-height:1.4; max-width:86vw; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,.45); white-space:pre-line;
     opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;}
   #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
   .modal{max-width:760px; margin:0 auto; background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:26px;}
@@ -185,6 +185,18 @@
   .badge.unlocked{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, var(--bg2));}
   @keyframes badgePop{0%{transform:scale(.2); opacity:0}60%{transform:scale(1.25); opacity:1}100%{transform:scale(1)}}
   .badge-pop-emoji{font-size:52px; display:inline-block; animation:badgePop .55s cubic-bezier(.2,1.6,.4,1);}
+  /* ===== 弹出层分级：Drawer（底部抽屉）/ Tooltip（跟随气泡）/ Popconfirm（轻确认） ===== */
+  .sheet-mask{position:fixed; inset:0; z-index:97; background:rgba(0,0,0,.5); display:none; opacity:0; transition:opacity .22s;}
+  .sheet-mask.show{opacity:1;}
+  .sheet{position:fixed; left:0; right:0; bottom:0; z-index:98; background:var(--panel); border:1px solid var(--line); border-bottom:none; border-radius:18px 18px 0 0; padding:10px 20px calc(20px + var(--sa-bottom, env(safe-area-inset-bottom, 0px))); max-height:72vh; overflow-y:auto; transform:translateY(100%); transition:transform .26s cubic-bezier(.32,.72,.35,1); display:none;}
+  .sheet.open{transform:translateY(0);}
+  .sheet-handle{width:38px; height:4px; border-radius:99px; background:var(--line); margin:2px auto 12px;}
+  #tip-pop{position:fixed; z-index:99; display:none; max-width:300px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; box-shadow:0 8px 30px rgba(0,0,0,.45); font-size:13px; line-height:1.7;}
+  #tip-pop::before{content:""; position:absolute; top:-5px; left:var(--arrow-x, 24px); width:10px; height:10px; background:var(--panel); border-left:1px solid var(--line); border-top:1px solid var(--line); transform:rotate(45deg);}
+  #tip-pop .pc-row{display:flex; gap:8px; justify-content:flex-end; margin-top:10px;}
+  #toast.err{background:rgba(90,32,32,.96); border-color:var(--danger, #e06565);}
+  #toast.warn{background:rgba(80,64,20,.96); border-color:var(--warn);}
+  #toast.ok{background:rgba(20,70,48,.96); border-color:var(--ok);}
   #remind-banner{position:fixed; top:0; left:0; right:0; z-index:200; display:none; background:linear-gradient(90deg,#3a2f10,#2a2410); border-bottom:1px solid var(--warn); padding:12px 22px; align-items:center; gap:14px;}
   /* 长文本（例句/释义）自动折行，杜绝横向滚动 */
   .card p, .card td, .card div, .q-prompt, .explain, .optnotes, .opt, .failbox, .guide{overflow-wrap:break-word; word-break:break-word;}
@@ -835,6 +847,9 @@
   <button class="btn ghost" id="btn-banner-close" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg></button>
 </div>
 <div id="dict-pop"></div>
+<div class="sheet-mask" id="sheet-mask"></div>
+<div class="sheet" id="sheet"></div>
+<div id="tip-pop"></div>
 
 <script>
 /* ================= 内置词典（牛津/柯林斯风格简明译注） ================= */
@@ -3823,7 +3838,7 @@ const LS_KEY = "wordTrainer.v1";
    原理：APK 只是壳，页面本体可热替换。服务器上放 version.json：
    {"version":"1.1.1","html":"<新版 index.html 的下载地址>","note":"更新说明"}
    应用启动时静默检查；发现新版本则弹窗，确认后下载并写入应用私有目录，重启即新版。 */
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.2.5";
 /* 更新地址：raw 为主（版本信息最新），jsdelivr CDN 为备用（国内更稳但有缓存延迟） */
 const UPDATE_MANIFESTS = [
   "https://raw.githubusercontent.com/Huixd-ai/my-word/main/version.json",
@@ -3864,7 +3879,7 @@ async function fetchFirst(urls, validate){
 }
 async function checkUpdate(manual){
   if(!isAndroidShell()){
-    if(manual) showMsg("当前是网页版，刷新页面即为最新版");
+    if(manual) toast("当前是网页版，刷新页面即为最新版");
     return;
   }
   const m = await fetchFirst(UPDATE_MANIFESTS, async r=>{
@@ -3872,7 +3887,7 @@ async function checkUpdate(manual){
     return j && j.version ? j : null;
   });
   if(!m){
-    if(manual) showMsg("检查失败：无法连接更新服务器");
+    if(manual) toast("检查失败：无法连接更新服务器",3000,"err");
     return;
   }
   if(cmpVer(m.version, APP_VERSION) > 0){
@@ -4034,6 +4049,14 @@ function dayKey(){
   return state.curDay;
 }
 function srsOf(w){ return (state.srs||{})[w] || null; }
+/* ===== FSRS-4.5 记忆算法（默认权重，目标留存率 0.9）=====
+   q 映射：q<3 → G1(遗忘)，q===3 → G2(模糊/困难)，q≥4 → G3(认识/良好) */
+const FSRS_W = [0.4872,1.4003,3.7145,13.8206,5.1618,1.2298,0.8975,0.031,1.6474,0.1367,1.0461,2.1072,0.0793,0.3246,1.587,0.2272,2.8755];
+const FSRS_DECAY = -0.5, FSRS_FACTOR = 19/81;
+function fsrsR(t, s){ return Math.pow(1 + FSRS_FACTOR*t/s, FSRS_DECAY); }          // t 天后的留存率
+function fsrsI(s){ return s/FSRS_FACTOR*(Math.pow(0.9, 1/FSRS_DECAY)-1); }         // 留存率降到 0.9 所需天数
+function clampF(x, a, b){ return Math.min(b, Math.max(a, x)); }
+function daysDiff(a, b){ return Math.max(0, Math.round((new Date(b+"T00:00:00") - new Date(a+"T00:00:00"))/86400000)); }
 function srsRecord(w, q){
   if(!state.srs) state.srs = {};
   const r = state.srs[w] || (state.srs[w] = {ease:2.5, ivl:0, due:todayStr(), reps:0, lapses:0});
@@ -4044,16 +4067,42 @@ function srsRecord(w, q){
     const h = state.curveHist[b] || (state.curveHist[b] = {s:0,n:0});
     h.n++; if(q>=3) h.s++;
   }
-  if(q < 3){
-    r.reps = 0; r.ivl = 1; r.lapses = (r.lapses||0)+1;
-    r.ease = Math.max(1.3, +(r.ease-0.2).toFixed(2));
-  }else{
-    r.reps = (r.reps||0)+1;
-    r.ivl = r.reps===1 ? 1
-          : r.reps===2 ? Math.max(2, Math.round(3*r.ease/2.5))
-          : Math.max(1, Math.round((r.ivl||1)*r.ease));
-    if(q===3) r.ivl = Math.max(1, Math.round(r.ivl*0.6)); // 模糊：间隔打折
+  const G = q<3 ? 1 : (q===3 ? 2 : 3);
+  const today = todayStr();
+  // 迁移：旧 SM-2 记录没有 s/d 字段时按旧间隔与难度因子估算
+  if(typeof r.s !== "number"){
+    r.s = Math.max(0.4, r.ivl || 0.4);
+    r.d = clampF(9 - ((r.ease||2.5)-1.3)/1.9*7, 1, 10);
+    if(r.reps > 0 || r.ivl > 0) r.fsrsInit = 1;
   }
+  const W = FSRS_W;
+  const elapsed = r.last ? daysDiff(r.last, today) : (r.ivl > 0 ? r.ivl : 0); // 距上次复习的天数
+  if(!r.fsrsInit){
+    // 首次评级：S0 = w[G-1]，D0 = w4 - (G-3)·w5
+    r.s = W[G-1];
+    r.d = clampF(W[4] - (G-3)*W[5], 1, 10);
+    r.fsrsInit = 1;
+    r.reps = (r.reps||0)+1;
+    if(G===1) r.lapses = (r.lapses||0)+1;
+  }else{
+    const R = fsrsR(elapsed, r.s);
+    r.d = clampF(W[7]*W[4] + (1-W[7])*(r.d - W[6]*(G-3)), 1, 10); // 复习后难度
+    if(G===1){
+      // 遗忘后的稳定性（post-lapse）
+      const sf = W[11]*Math.pow(r.d, -W[12])*(Math.pow(r.s+1, W[13])-1)*Math.exp(W[14]*(1-R));
+      r.s = Math.max(0.1, Math.min(sf, r.s));
+      r.reps = 0;
+      r.lapses = (r.lapses||0)+1;
+    }else{
+      // 回忆成功后的稳定性增长
+      r.s = r.s*(1 + Math.exp(W[8])*(11-r.d)*Math.pow(r.s, -W[9])*(Math.exp(W[10]*(1-R))-1)*(G===2 ? W[15] : 1));
+      r.reps = (r.reps||0)+1;
+    }
+  }
+  let ivl = G===1 ? 1 : clampF(Math.round(fsrsI(r.s)), 1, 365);
+  if(ivl > 2) ivl = Math.max(1, Math.round(ivl*(1 + (Math.random()*0.1 - 0.05)))); // ±5% 抖动防到期扎堆
+  r.ivl = ivl;
+  r.last = today;
   r.due = todayStr(addDays(new Date(), r.ivl));
   save();
 }
@@ -4150,7 +4199,7 @@ async function speakOnline(text){
       }
     }
   }catch(e){}
-  showMsg("无法播放发音：本机没有可用的英文语音引擎，且在线发音加载失败。请检查网络后重试；也可在系统设置里安装「Google 语音服务」获得离线发音。");
+  toast("无法播放发音：本机没有可用的英文语音引擎，且在线发音加载失败。请检查网络后重试；也可在系统设置里安装「Google 语音服务」获得离线发音。",5000,"err");
 }
 
 /* ================= 点查词典 ================= */
@@ -4386,8 +4435,8 @@ document.getElementById("btn-learn").onclick = startLearning;
 
 /* 通用滚动选择器：单一入口，点击弹出可滚动列表 */
 function openPicker(title, options, current, onPick){
-  openModal(`<h3 style="margin-top:0">${title}</h3>
-    <div class="pick-list" id="pick-list">` +
+  openSheet(title,
+    `<div class="pick-list" id="pick-list">` +
     options.map(o=>`<button class="pick-item ${String(o.v)===String(current)?"on":""}" data-v="${o.v}" ${o.dis?"disabled":""}>${o.label}</button>`).join("") +
     `</div>`);
   const list = $("pick-list");
@@ -4396,7 +4445,7 @@ function openPicker(title, options, current, onPick){
   list.querySelectorAll(".pick-item").forEach(b=>b.onclick = ()=>{
     if(b.disabled) return;
     onPick(b.dataset.v);
-    $("modal-mask").style.display = "none";
+    closeSheet();
   });
 }
 /* 双列时间选择器：左列 24 小时，右列 60 分钟，点选即生效 */
@@ -4405,7 +4454,7 @@ function openTimePicker(current, onPick){
   const hs = [], ms = [];
   for(let h=0; h<24; h++) hs.push(String(h).padStart(2,"0"));
   for(let m=0; m<60; m++) ms.push(String(m).padStart(2,"0"));
-  openModal(`<h3 style="margin-top:0">每日提醒时间</h3>
+  openSheet("每日提醒时间", `
     <div class="pick-cols">
       <div class="pick-list" id="pick-h">` + hs.map(h=>`<button class="pick-item ${h===ch?"on":""}" data-v="${h}">${h} 时</button>`).join("") + `</div>
       <div class="pick-list" id="pick-m">` + ms.map(m=>`<button class="pick-item ${m===cm?"on":""}" data-v="${m}">${m} 分</button>`).join("") + `</div>
@@ -4499,7 +4548,7 @@ function startLearning(){
   const unseen = full.filter(c=>!state.seen[c.word]);
   const seen = full.filter(c=>state.seen[c.word]).sort((a,b)=>avgDim(a.word)-avgDim(b.word));
   const queue = unseen.concat(seen).slice(0,n);
-  if(queue.length===0){ showMsg("没有可学习的完整卡片，请先在「词库」中补全或导入卡片。"); return; }
+  if(queue.length===0){ toast("没有可学习的完整卡片，请先在「词库」中补全或导入卡片。",4000,"warn"); return; }
   learn = {queue, wi:0, dimIdx:-1, results:[], done:{}, resumeDim:0, srsDone:{}};
   saveDeep();
   pushHist(); // 进入子流程：压一条历史供返回键拦截
@@ -4793,8 +4842,7 @@ function updateDictSrcUI(){
 }
 $("dict-info").onclick = e=>{
   e.stopPropagation();
-  openModal(`<h3 style="margin-top:0">译注来源说明</h3>
-    <p class="muted">内置词典：基于开源 ECDICT（MIT 协议）裁剪，2.8 万词条离线可查，含多义项释义、音标、词性、柯林斯星级、考试标签和词形还原（如 went→go）。<br>Wiktionary 在线词典：开放协议（CC BY-SA），内容更全但国内访问较慢，仅在「在线优先」模式或内置未收录时手动点击使用；离线时该选项自动锁定。</p>`);
+  tipPop($("dict-info"), `内置词典：基于开源 ECDICT（MIT 协议）裁剪，2.8 万词条离线可查，含多义项释义、音标、词性、柯林斯星级、考试标签和词形还原（如 went→go）。<br>Wiktionary 在线词典：开放协议（CC BY-SA），内容更全但国内访问较慢，仅在「在线优先」模式或内置未收录时手动点击使用；离线时该选项自动锁定。`, 9000);
 };
 $("dict-pick").onclick = ()=>openPicker("译注来源", [
   {v:"auto", label:"内置词典优先，未收录可手动联网查"},
@@ -4917,7 +4965,7 @@ function startToday(){
     freshBoost: freshPicked.filter(x=>x.boost).map(x=>x.word)
   };
   if(!plan.reviews.length && !plan.fresh.length){
-    showMsg("今日没有到期复习词，新词也已推送完。明天再来吧。");
+    toast("今日没有到期复习词，新词也已推送完。明天再来吧。",3500);
     return;
   }
   state.todayPlan = {date:plan.date, reviews:plan.reviews.slice(), fresh:plan.fresh.slice(), freshBoost:(plan.freshBoost||[]).slice()};
@@ -5243,7 +5291,7 @@ function startQuiz(){
   const restored = restoreQuizProg();
   session = restored || {qs: buildSession(sessionN), i:0, right:0};
   $("quiz-start").style.display="none"; $("quiz-end").style.display="none"; $("learn-run").style.display="none";
-  if(session.qs.length===0){ showMsg("没有可出题的完整卡片，请先在「词库」中补全或导入卡片。"); $("quiz-start").style.display="block"; return; }
+  if(session.qs.length===0){ toast("没有可出题的完整卡片，请先在「词库」中补全或导入卡片。",4000,"warn"); $("quiz-start").style.display="block"; return; }
   pushHist(); // 进入子流程：压一条历史供返回键拦截
   $("quiz-run").style.display="block";
   saveQuizProg();
@@ -5357,16 +5405,77 @@ function openModal(html, prev){
 }
 function closeModalUI(){ $("modal-mask").style.display="none"; modalStack = []; }
 /* WebView 不支持原生 alert/confirm，统一走应用内弹窗 */
-function showMsg(text){ openModal(`<p style="margin:6px 0 2px;line-height:1.8">${esc(text).replace(/\n/g,"<br>")}</p>`); }
-/* 轻量消息条：底部浮出、约 2 秒自动淡出、不遮挡不拦截操作 */
+/* 轻量消息条（Toast）：底部浮出、自动淡出、不遮挡不拦截操作；多条排队依次显示 */
 let toastTimer = null;
-function toast(text, ms){
-  const el = $("toast");
-  el.textContent = text;
-  el.classList.add("show");
-  if(toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>{ el.classList.remove("show"); }, ms || 2000);
+const toastQueue = [];
+function toast(text, ms, type){
+  toastQueue.push({text, ms: ms || 2200, type: type || ""});
+  if(toastQueue.length === 1) runToastQueue();
 }
+function runToastQueue(){
+  const item = toastQueue[0];
+  if(!item) return;
+  const el = $("toast");
+  el.textContent = item.text;
+  el.className = "show" + (item.type ? " " + item.type : "");
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{
+    el.classList.remove("show");
+    toastQueue.shift();
+    setTimeout(runToastQueue, 260);
+  }, item.ms);
+}
+/* ================= Drawer：底部抽屉（边看边改，选择器专用） ================= */
+function openSheet(title, bodyHtml){
+  $("sheet").innerHTML = `<div class="sheet-handle"></div><h3 style="margin:0 0 8px;text-align:center">${esc(title)}</h3>${bodyHtml}`;
+  const mask = $("sheet-mask");
+  mask.style.display = "block";
+  const sh = $("sheet");
+  sh.style.display = "block";
+  sh.scrollTop = 0;
+  requestAnimationFrame(()=>{ mask.classList.add("show"); sh.classList.add("open"); });
+  pushHist();
+}
+function closeSheet(){
+  const mask = $("sheet-mask"), sh = $("sheet");
+  mask.classList.remove("show"); sh.classList.remove("open");
+  setTimeout(()=>{ mask.style.display = "none"; sh.style.display = "none"; }, 260);
+}
+function sheetOpen(){ return $("sheet").style.display === "block"; }
+/* ================= Tooltip / Popconfirm：跟随元素的轻气泡 ================= */
+let tipHide = null;
+function positionTip(anchor){
+  const tip = $("tip-pop");
+  const r = anchor.getBoundingClientRect();
+  tip.style.display = "block";
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let x = Math.min(Math.max(8, r.left + r.width/2 - tw/2), window.innerWidth - tw - 8);
+  let y = r.bottom + 10;
+  if(y + th > window.innerHeight - 10) y = Math.max(8, r.top - th - 10);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+  tip.style.setProperty("--arrow-x", Math.max(10, Math.min(tw-20, r.left + r.width/2 - x - 5)) + "px");
+}
+function tipPop(anchor, html, ms){ // Tooltip：跟随的小注释，点击其他处或超时消失
+  const tip = $("tip-pop");
+  tip.innerHTML = html;
+  positionTip(anchor);
+  if(tipHide) clearTimeout(tipHide);
+  if(ms) tipHide = setTimeout(()=>{ tip.style.display = "none"; }, ms);
+}
+function popConfirm(anchor, text, okLabel, onOk){ // Popconfirm：按钮旁的高频轻确认
+  const tip = $("tip-pop");
+  tip.innerHTML = `<div>${esc(text)}</div><div class="pc-row">
+    <button class="btn ghost" id="pc-no" style="padding:5px 14px;font-size:12.5px">取消</button>
+    <button class="btn primary" id="pc-yes" style="padding:5px 14px;font-size:12.5px">${esc(okLabel||"确认")}</button></div>`;
+  positionTip(anchor);
+  if(tipHide) clearTimeout(tipHide);
+  $("pc-no").onclick = ()=>{ tip.style.display = "none"; };
+  $("pc-yes").onclick = ()=>{ tip.style.display = "none"; onOk(); };
+}
+document.addEventListener("click", e=>{
+  if($("tip-pop").style.display === "block" && !e.target.closest("#tip-pop")) $("tip-pop").style.display = "none";
+}, true);
+$("sheet-mask").onclick = ()=>closeSheet();
 function confirmModal(title, text, okLabel, onOk){
   openModal(`<h3 style="margin-top:0">${esc(title)}</h3>
     <p class="muted" style="line-height:1.8">${esc(text).replace(/\n/g,"<br>")}</p>
@@ -5862,7 +5971,7 @@ function renderCheckin(){
   }
   $("ci-cal").innerHTML = cells;
   $("ci-cal").querySelectorAll(".ci-day.leave").forEach(el=>{
-    el.onclick = ()=>showMsg(`${el.dataset.leave} 请假\n理由：${state.leaves[el.dataset.leave]}`);
+    el.onclick = ()=>toast(`${el.dataset.leave} 请假\n理由：${state.leaves[el.dataset.leave]}`,3500);
   });
   renderHeatmap();
   checkBadges(true);
@@ -5907,7 +6016,7 @@ function renderHeatmap(){
       const ds = el.dataset.ds, n = +el.dataset.n;
       const ck = (state.checkins||{})[ds], lv = (state.leaves||{})[ds];
       const status = ck ? "已打卡 ✓" : lv ? `请假 ☾（${lv}）` : "未打卡";
-      showMsg(`${ds}\n学习 ${n} 词 · ${status}`);
+      toast(`${ds}\n学习 ${n} 词 · ${status}`,3500);
     };
   });
 }
@@ -5973,7 +6082,7 @@ function renderBadges(){
     el.onclick = ()=>{
       const b = BADGES.find(x=>x.id === el.dataset.b);
       const un = state.badges[b.id];
-      showMsg(`${b.icon} ${b.name}\n${b.desc}\n${un ? "已于 " + new Date(un).toLocaleDateString("zh-CN") + " 解锁" : "未解锁"}`);
+      toast(`${b.icon} ${b.name}\n${b.desc}\n${un ? "已于 " + new Date(un).toLocaleDateString("zh-CN") + " 解锁" : "未解锁"}`,4000);
     };
   });
 }
@@ -5991,7 +6100,7 @@ $("btn-checkin").onclick = ()=>{
   if(p.reviewN + p.freshN > 0 && studied < p.reviewN + p.freshN) missing.push("当日学习量未完成");
   if(!flags.deep) missing.push("未完成一组抽象词深度训练");
   if(!flags.quiz) missing.push("未完成一轮快速复习");
-  if(missing.length){ showMsg("还不能打卡：\n" + missing.join("\n")); return; }
+  if(missing.length){ toast("还不能打卡：\n" + missing.join("\n"),4000,"warn"); return; }
   if(!state.checkins) state.checkins = {};
   state.checkins[t] = true;
   save(); renderCheckin();
@@ -5999,10 +6108,11 @@ $("btn-checkin").onclick = ()=>{
 $("btn-leave").onclick = ()=>{
   const t = dayKey();
   if(!state.leaves) state.leaves = {};
-  if(state.leaves[t]){ // 撤销请假（二次确认）
-    confirmModal("撤销请假", "撤销今天的请假？撤销后今天需要正常完成学习并打卡。", "确认撤销", ()=>{
+  if(state.leaves[t]){ // 撤销请假（轻确认气泡，不打断页面）
+    popConfirm($("btn-leave"), "撤销今天的请假？撤销后需正常完成学习并打卡。", "确认撤销", ()=>{
       delete state.leaves[t];
       save(); renderCheckin();
+      toast("已撤销请假", 2200, "ok");
     });
     return;
   }
@@ -6016,7 +6126,7 @@ $("btn-leave").onclick = ()=>{
   $("leave-cancel").onclick = ()=>$("modal-mask").style.display = "none";
   $("leave-ok").onclick = ()=>{
     const reason = $("leave-reason").value.trim();
-    if(!reason){ showMsg("请填写请假理由。"); return; }
+    if(!reason){ toast("请填写请假理由。",2500,"err"); return; }
     state.leaves[t] = reason;
     save();
     $("modal-mask").style.display = "none";
@@ -6200,7 +6310,7 @@ $("btn-reset").onclick = ()=>{
     confirmModal("最后确认", "真的要清空全部学习数据吗？清空后无法恢复。", "确认重置", ()=>{
       state.dims={}; state.log=[]; state.seen={}; state.srs={}; state.introduced={}; state.studyToday={}; state.badges={};
       save(); renderStats();
-      showMsg("学习数据已清空。");
+      toast("学习数据已清空。",2500,"ok");
     });
   });
 };
@@ -6243,6 +6353,8 @@ window.addEventListener("popstate", ()=>{
   if($("modal-mask").style.display === "block"){
     if(modalStack.length){ modalStack.pop()(); } // 逐级退回上一层弹窗（如今日词汇列表）
     else $("modal-mask").style.display = "none"; // 没有上层了才关弹窗
+  } else if(sheetOpen()){
+    closeSheet(); // 底部抽屉（选择器）返回即收起
   } else if(curView === "quiz" && quizSubOpen()){
     exitRound(); // 学习子流程（计划/做题/小结）→ 学习主页
   } else if(curView === "lib" && $("lib-list-card").style.display === "block"){

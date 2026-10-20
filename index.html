@@ -164,6 +164,27 @@
   .ci-day.on{background:rgba(62,207,142,.2); border-color:var(--ok); color:var(--ok); font-weight:700;}
   .ci-day.today{border-color:var(--accent); color:var(--text);}
   .ci-day.blank{border:none; background:transparent;}
+  /* 学习热力图（GitHub 风格） */
+  .heat-wrap{overflow-x:auto; padding:4px 2px 6px; -webkit-overflow-scrolling:touch;}
+  .heat-grid{display:grid; grid-template-rows:repeat(7, 12px); grid-auto-flow:column; grid-auto-columns:12px; gap:3px; width:max-content; margin:0 auto;}
+  .heat-cell{border-radius:3px; background:var(--bg2); border:1px solid var(--line); box-sizing:border-box; cursor:pointer;}
+  .heat-cell.l1{background:color-mix(in srgb, var(--ok) 30%, var(--bg2)); border-color:transparent;}
+  .heat-cell.l2{background:color-mix(in srgb, var(--ok) 55%, var(--bg2)); border-color:transparent;}
+  .heat-cell.l3{background:color-mix(in srgb, var(--ok) 80%, var(--bg2)); border-color:transparent;}
+  .heat-cell.l4{background:var(--ok); border-color:transparent;}
+  .heat-cell.leave{background:color-mix(in srgb, var(--warn) 65%, var(--bg2)); border-color:transparent;}
+  .heat-cell.today{outline:2px solid var(--accent); outline-offset:1px;}
+  .heat-cell.future{opacity:.3; pointer-events:none;}
+  /* 成就徽章墙 */
+  .badge-wall{display:grid; grid-template-columns:repeat(auto-fill, minmax(84px, 1fr)); gap:10px; margin-top:10px;}
+  .badge{text-align:center; padding:12px 4px 10px; border-radius:12px; border:1px solid var(--line); background:var(--bg2); cursor:pointer; transition:transform .15s;}
+  .badge:active{transform:scale(.94);}
+  .badge .bi{font-size:26px; line-height:1.3;}
+  .badge .bn{font-size:12px; margin-top:3px; line-height:1.3;}
+  .badge.locked{opacity:.35; filter:grayscale(1);}
+  .badge.unlocked{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, var(--bg2));}
+  @keyframes badgePop{0%{transform:scale(.2); opacity:0}60%{transform:scale(1.25); opacity:1}100%{transform:scale(1)}}
+  .badge-pop-emoji{font-size:52px; display:inline-block; animation:badgePop .55s cubic-bezier(.2,1.6,.4,1);}
   #remind-banner{position:fixed; top:0; left:0; right:0; z-index:200; display:none; background:linear-gradient(90deg,#3a2f10,#2a2410); border-bottom:1px solid var(--warn); padding:12px 22px; align-items:center; gap:14px;}
   /* 长文本（例句/释义）自动折行，杜绝横向滚动 */
   .card p, .card td, .card div, .q-prompt, .explain, .optnotes, .opt, .failbox, .guide{overflow-wrap:break-word; word-break:break-word;}
@@ -727,6 +748,12 @@
       <p id="ci-streak" style="margin-top:18px;font-size:15px"></p>
     </div>
     <div class="card">
+      <h3 style="margin-top:0">学习热力图</h3>
+      <div class="heat-wrap" id="ci-heat-wrap"><div class="heat-grid" id="ci-heat"></div></div>
+      <p class="muted" style="font-size:11px;margin:8px 0 0" id="ci-heat-range"></p>
+      <p class="muted" style="font-size:11px;margin:2px 0 0">绿色深浅 = 当天学习词数 · 黄色 = 请假 · 点格子看详情</p>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0">打卡日历</h3>
       <div class="row" style="justify-content:space-between;align-items:center;margin:2px 0 8px">
         <button class="btn ghost" id="btn-cal-prev" style="padding:6px 16px;font-size:15px" aria-label="上个月">‹</button>
@@ -734,6 +761,11 @@
         <span style="display:inline-flex;align-items:center;gap:8px"><span class="link-btn" id="btn-cal-today" style="display:none;font-size:13px">回到今天</span><button class="btn ghost" id="btn-cal-next" style="padding:6px 16px;font-size:15px" aria-label="下个月">›</button></span>
       </div>
       <div class="ci-cal" id="ci-cal"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">成就徽章 <span class="muted" id="badge-count" style="font-size:12px;font-weight:400"></span></h3>
+      <div class="badge-wall" id="badge-wall"></div>
+      <p class="muted" style="font-size:11px;margin:8px 0 0">完成对应目标自动解锁徽章，点徽章查看解锁条件</p>
     </div>
   </div>
 
@@ -3791,7 +3823,7 @@ const LS_KEY = "wordTrainer.v1";
    原理：APK 只是壳，页面本体可热替换。服务器上放 version.json：
    {"version":"1.1.1","html":"<新版 index.html 的下载地址>","note":"更新说明"}
    应用启动时静默检查；发现新版本则弹窗，确认后下载并写入应用私有目录，重启即新版。 */
-const APP_VERSION = "1.2.3";
+const APP_VERSION = "1.2.4";
 /* 更新地址：raw 为主（版本信息最新），jsdelivr CDN 为备用（国内更稳但有缓存延迟） */
 const UPDATE_MANIFESTS = [
   "https://raw.githubusercontent.com/Huixd-ai/my-word/main/version.json",
@@ -5758,6 +5790,7 @@ function markDaily(k){
   if(!state.dailyDone[t]) state.dailyDone[t] = {};
   state.dailyDone[t][k] = true;
   save();
+  checkBadges(true); // 完成深度训练/快速复习时即时检测徽章
 }
 function renderCheckin(){
   const t = dayKey();
@@ -5808,13 +5841,7 @@ function renderCheckin(){
   const dlDate = addDays(new Date(t+"T12:00:00"), 1);
   const dlLabel = todayStr(dlDate) === todayStr() ? "今日" : "明日";
   $("ci-deadline").textContent = `打卡截止：${dlLabel}凌晨 4:00 · 未完成当日任务不翻日`;
-  let streak = 0;
-  const d = new Date(t+"T12:00:00"); // t 为学习日
-  if(!state.checkins[t] && !state.leaves[t]) d.setDate(d.getDate()-1); // 本学习日没打卡也没请假：连击数先算到昨天
-  while(state.checkins[todayStr(d)] || state.leaves[todayStr(d)]){
-    if(state.checkins[todayStr(d)]) streak++; // 请假不断连击但不计入天数
-    d.setDate(d.getDate()-1);
-  }
+  let streak = calcStreak();
   const totalDays = Object.keys(state.checkins).length;
   $("ci-streak").innerHTML = `连续打卡 <b style="color:var(--warn)">${streak}</b> 天 · 累计打卡 <b style="color:var(--ok)">${totalDays}</b> 天`;
   // 日历（支持左右翻月，calOffset=0 为当月，不可翻看未来月份）
@@ -5836,6 +5863,118 @@ function renderCheckin(){
   $("ci-cal").innerHTML = cells;
   $("ci-cal").querySelectorAll(".ci-day.leave").forEach(el=>{
     el.onclick = ()=>showMsg(`${el.dataset.leave} 请假\n理由：${state.leaves[el.dataset.leave]}`);
+  });
+  renderHeatmap();
+  checkBadges(true);
+  renderBadges();
+}
+/* 连续打卡天数（请假不断连击但不计入天数） */
+function calcStreak(){
+  const t = dayKey();
+  let streak = 0;
+  const d = new Date(t+"T12:00:00");
+  if(!state.checkins[t] && !state.leaves[t]) d.setDate(d.getDate()-1); // 本学习日没打卡也没请假：先算到昨天
+  while(state.checkins[todayStr(d)] || state.leaves[todayStr(d)]){
+    if(state.checkins[todayStr(d)]) streak++;
+    d.setDate(d.getDate()-1);
+  }
+  return streak;
+}
+/* ================= 学习热力图（GitHub 风格 · 近 26 周） ================= */
+function renderHeatmap(){
+  const t = dayKey();
+  const today = new Date(t+"T12:00:00");
+  const WEEKS = 26;
+  const dow = (today.getDay()+6)%7; // 周一开头
+  const start = addDays(today, -(WEEKS-1)*7 - dow);
+  const st = state.studyToday || {};
+  let cells = "";
+  for(let i=0; i<WEEKS*7; i++){
+    const d = addDays(start, i);
+    const ds = todayStr(d);
+    const future = d > today;
+    const n = future ? 0 : (st[ds]||0);
+    const lv = n === 0 ? 0 : n < 10 ? 1 : n < 20 ? 2 : n < 40 ? 3 : 4;
+    const cls = ["heat-cell", lv ? "l"+lv : "", (state.leaves||{})[ds] ? "leave" : "", ds === t ? "today" : "", future ? "future" : ""].join(" ");
+    cells += `<div class="${cls}" data-ds="${ds}" data-n="${n}"></div>`;
+  }
+  $("ci-heat").innerHTML = cells;
+  $("ci-heat-range").textContent = `${todayStr(start)} ~ ${t} · 近 ${WEEKS} 周`;
+  const wrap = $("ci-heat-wrap");
+  wrap.scrollLeft = wrap.scrollWidth; // 默认滚到最近
+  $("ci-heat").querySelectorAll(".heat-cell").forEach(el=>{
+    el.onclick = ()=>{
+      const ds = el.dataset.ds, n = +el.dataset.n;
+      const ck = (state.checkins||{})[ds], lv = (state.leaves||{})[ds];
+      const status = ck ? "已打卡 ✓" : lv ? `请假 ☾（${lv}）` : "未打卡";
+      showMsg(`${ds}\n学习 ${n} 词 · ${status}`);
+    };
+  });
+}
+/* ================= 成就徽章 ================= */
+const BADGES = [
+  {id:"ck1",   icon:"🌱", name:"初来乍到", desc:"完成第 1 次打卡",            need:s=>s.totalCheckins>=1},
+  {id:"st7",   icon:"🔥", name:"七日之约", desc:"连续打卡 7 天",              need:s=>s.streak>=7},
+  {id:"st30",  icon:"🗓️", name:"月度坚守", desc:"连续打卡 30 天",             need:s=>s.streak>=30},
+  {id:"st100", icon:"🏔️", name:"百日筑基", desc:"连续打卡 100 天",            need:s=>s.streak>=100},
+  {id:"ck50",  icon:"🏆", name:"半程勋章", desc:"累计打卡 50 天",             need:s=>s.totalCheckins>=50},
+  {id:"w500",  icon:"📖", name:"词汇新星", desc:"累计学习 500 词次",          need:s=>s.totalWords>=500},
+  {id:"w2000", icon:"📚", name:"词汇达人", desc:"累计学习 2000 词次",         need:s=>s.totalWords>=2000},
+  {id:"w5000", icon:"🎓", name:"词汇大师", desc:"累计学习 5000 词次",         need:s=>s.totalWords>=5000},
+  {id:"dp10",  icon:"🔬", name:"深度探索者", desc:"完成深度训练满 10 天",     need:s=>s.deepDays>=10},
+  {id:"dp50",  icon:"🧠", name:"深度大师", desc:"完成深度训练满 50 天",       need:s=>s.deepDays>=50},
+  {id:"qz30",  icon:"⚡", name:"复习狂人", desc:"完成快速复习满 30 天",       need:s=>s.quizDays>=30},
+  {id:"dw100", icon:"💯", name:"一日百词", desc:"单日学习 100 词次",          need:s=>s.maxDayWords>=100},
+  {id:"acc90", icon:"🎯", name:"百发百中", desc:"单日答题 ≥20 道且正确率 ≥90%", need:s=>s.accDay},
+  {id:"q1000", icon:"📝", name:"千题斩",   desc:"累计答题 1000 道",           need:s=>s.totalAns>=1000},
+  {id:"lv1",   icon:"😴", name:"张弛有度", desc:"第一次合理请假",             need:s=>s.leaves>=1},
+];
+function badgeStats(){
+  const ck = state.checkins||{}, lv = state.leaves||{}, stoday = state.studyToday||{}, dd = state.dailyDone||{};
+  let totalWords = 0, maxDayWords = 0;
+  for(const k in stoday){ totalWords += stoday[k]; if(stoday[k] > maxDayWords) maxDayWords = stoday[k]; }
+  let deepDays = 0, quizDays = 0;
+  for(const k in dd){ if(dd[k].deep) deepDays++; if(dd[k].quiz) quizDays++; }
+  const perDay = {};
+  (state.log||[]).forEach(l=>{
+    const ds = todayStr(new Date(l.t));
+    const x = perDay[ds] = perDay[ds] || {n:0, ok:0};
+    x.n++; if(l.ok) x.ok++;
+  });
+  const accDay = Object.keys(perDay).some(k=>{ const x = perDay[k]; return x.n >= 20 && x.ok/x.n >= 0.9; });
+  return {totalCheckins:Object.keys(ck).length, streak:calcStreak(), totalWords, maxDayWords, deepDays, quizDays, accDay, totalAns:(state.log||[]).length, leaves:Object.keys(lv).length};
+}
+function checkBadges(notify){
+  if(!state.badges) state.badges = {};
+  const s = badgeStats();
+  const fresh = [];
+  for(const b of BADGES){
+    if(!state.badges[b.id] && b.need(s)){ state.badges[b.id] = Date.now(); fresh.push(b); }
+  }
+  if(fresh.length){ save(); if(notify) showBadgeUnlock(fresh); }
+  return fresh;
+}
+function showBadgeUnlock(list){
+  const items = list.map(b=>`<div style="display:flex;align-items:center;gap:14px;margin-top:14px;text-align:left"><span class="badge-pop-emoji">${b.icon}</span><span><b style="font-size:16px">${b.name}</b><br><span class="muted" style="font-size:12.5px">${b.desc}</span></span></div>`).join("");
+  openModal(`<h3 style="margin-top:0;text-align:center">🎉 解锁新徽章</h3>${items}
+    <div class="row" style="justify-content:center;margin-top:20px"><button class="btn primary" id="badge-ok">收下</button></div>`);
+  $("badge-ok").onclick = closeModalUI;
+}
+function renderBadges(){
+  if(!state.badges) state.badges = {};
+  const wall = $("badge-wall");
+  wall.innerHTML = BADGES.map(b=>{
+    const un = state.badges[b.id];
+    return `<div class="badge ${un ? "unlocked" : "locked"}" data-b="${b.id}">
+      <div class="bi">${b.icon}</div><div class="bn">${b.name}</div></div>`;
+  }).join("");
+  $("badge-count").textContent = `${Object.keys(state.badges).length} / ${BADGES.length}`;
+  wall.querySelectorAll(".badge").forEach(el=>{
+    el.onclick = ()=>{
+      const b = BADGES.find(x=>x.id === el.dataset.b);
+      const un = state.badges[b.id];
+      showMsg(`${b.icon} ${b.name}\n${b.desc}\n${un ? "已于 " + new Date(un).toLocaleDateString("zh-CN") + " 解锁" : "未解锁"}`);
+    };
   });
 }
 /* 打卡日历翻月：0=当月，负数往过去翻，不允许看未来月份 */
@@ -6057,9 +6196,9 @@ function drawForgettingCurve(){
   // 图例已移至画布下方的 HTML（.cv-legend），窄屏自动换行，不再画进画布被裁切
 }
 $("btn-reset").onclick = ()=>{
-  confirmModal("重置学习数据", "将清空：维度强度、做题记录、记忆调度、今日进度。\n打卡日历与词库内容保留。此操作不可撤销。", "我已了解，继续", ()=>{
+  confirmModal("重置学习数据", "将清空：维度强度、做题记录、记忆调度、今日进度与已解锁徽章。\n打卡日历与词库内容保留。此操作不可撤销。", "我已了解，继续", ()=>{
     confirmModal("最后确认", "真的要清空全部学习数据吗？清空后无法恢复。", "确认重置", ()=>{
-      state.dims={}; state.log=[]; state.seen={}; state.srs={}; state.introduced={}; state.studyToday={};
+      state.dims={}; state.log=[]; state.seen={}; state.srs={}; state.introduced={}; state.studyToday={}; state.badges={};
       save(); renderStats();
       showMsg("学习数据已清空。");
     });
